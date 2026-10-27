@@ -24,16 +24,3 @@ diff --git a/native/src/netdbg_lifetime_rev1655.c b/native/src/netdbg_lifetime_r
      if (FAILED(result) || handle == NULL || (uintptr_t)handle > UINT32_MAX) {
          return 0u;
      }
-
-diff --git a/native/src/netdbg_bootstrap.c b/native/src/netdbg_bootstrap.c
---- a/native/src/netdbg_bootstrap.c
-+++ b/native/src/netdbg_bootstrap.c
-@@ -53,8 +53,6 @@ static char g_m2a_marker_path[] =
- 
- static void write_m2a_marker(uint32_t phase, uint32_t runtime_result)
- {
--    const AzHookArenaDiagnostics diagnostics =
--        az_hook_arena_diagnostics();
-     const AzM2aMarker marker = {
-         {'A', 'Z', 'M', '2'},
-         3u,

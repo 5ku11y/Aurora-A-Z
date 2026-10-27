@@ -7,7 +7,7 @@ diff --git a/native/src/netdbg_lifetime_rev1655.c b/native/src/netdbg_lifetime_r
      }
 +
 +    /* Aurora's PluginManager identity ("dll.aurora.netdbg") is a logical
-+     * module key, not necessarily the kernel loader image name.  The Wolf
++     * module key, not necessarily the Xbox kernel loader image name.  The Wolf
 +     * V8A hardware dump on Rev1655 proved the PluginManager code signatures
 +     * and loader path are correct while bootstrap stopped before its first
 +     * worker marker.  Preserve the logical-name lookup first, then fall back

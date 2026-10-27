@@ -1,7 +1,7 @@
 diff --git a/native/src/netdbg_lifetime_rev1655.c b/native/src/netdbg_lifetime_rev1655.c
 --- a/native/src/netdbg_lifetime_rev1655.c
 +++ b/native/src/netdbg_lifetime_rev1655.c
-@@ -659,7 +659,20 @@ static uint8_t default_get_module_handle(
+@@ -659,7 +659,22 @@ static uint8_t default_get_module_handle(
      if (identity == NULL || module_handle == NULL) {
          return 0u;
      }

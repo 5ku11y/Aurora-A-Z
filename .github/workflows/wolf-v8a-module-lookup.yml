@@ -1,0 +1,75 @@
+name: Wolf V8A module lookup probe
+
+on:
+  push:
+    branches:
+      - wolf-v8a-resident-probe
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      OPENXECHAIN_ROOT: ${{ runner.temp }}/openxechain-prefix
+      OPENXECHAIN_CACHE_KEY: openxechain-linux-x64-v2-eed1fa65bf9577fd31625764b320a90182ea9ade
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Apply Wolf V8A module lookup patch
+        run: |
+          git apply --check scripts/wolf-v8a-module-lookup.patch
+          git apply scripts/wolf-v8a-module-lookup.patch
+          git diff --check
+
+      - name: Restore pinned OpenXeChain toolchain
+        id: openxechain-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ env.OPENXECHAIN_ROOT }}
+          key: ${{ env.OPENXECHAIN_CACHE_KEY }}
+          fail-on-cache-miss: true
+
+      - name: Verify cached OpenXeChain tools
+        run: |
+          test -x "${OPENXECHAIN_ROOT}/bin/clang"
+          test -x "${OPENXECHAIN_ROOT}/bin/lld-link"
+          test -x "${OPENXECHAIN_ROOT}/bin/synthxex"
+          "${OPENXECHAIN_ROOT}/bin/clang" --version
+
+      - name: Build Wolf V8A runtime
+        run: bash scripts/build-openxechain.sh
+
+      - name: Validate Wolf V8A runtime
+        run: |
+          output_dir="${GITHUB_WORKSPACE}/build/native-xbox360"
+          test -s "${output_dir}/AuroraAZ.xex"
+          test -s "${output_dir}/AuroraAZ.xex.sha256"
+          python3 - "${output_dir}/AuroraAZ.xex" <<'PY'
+          from pathlib import Path
+          import sys
+          p = Path(sys.argv[1])
+          if p.read_bytes()[:4] != b"XEX2":
+              raise SystemExit("runtime is not XEX2")
+          print(f"validated XEX2: {p} ({p.stat().st_size} bytes)")
+          PY
+          (cd "${output_dir}" && sha256sum --check AuroraAZ.xex.sha256)
+
+      - name: Stage NetDbgDll probe
+        run: |
+          mkdir -p build/wolf-v8a-module-lookup
+          cp build/native-xbox360/AuroraAZ.xex build/wolf-v8a-module-lookup/NetDbgDll.xex
+          (cd build/wolf-v8a-module-lookup && sha256sum NetDbgDll.xex > NetDbgDll.xex.sha256)
+
+      - name: Upload Wolf V8A module lookup probe
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Wolf-V8A-module-lookup-${{ github.sha }}
+          path: build/wolf-v8a-module-lookup/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

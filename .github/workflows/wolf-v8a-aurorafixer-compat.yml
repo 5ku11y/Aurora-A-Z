@@ -1,0 +1,185 @@
+name: Wolf V8A AuroraFixer compatibility probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      OPENXECHAIN_ROOT: /home/runner/work/_temp/openxechain-prefix
+      OPENXECHAIN_CACHE_KEY: openxechain-linux-x64-v2-eed1fa65bf9577fd31625764b320a90182ea9ade
+      OPENXECHAIN_SYNTHXEX_COMMIT: 48d1453a55468aa2f8a211db0b20edd594ef5be3
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Apply Wolf V8A module lookup patch
+        run: |
+          git apply --check scripts/wolf-v8a-module-lookup.patch
+          git apply scripts/wolf-v8a-module-lookup.patch
+          git diff --check
+
+      - name: Admit only the known AuroraFixer ordinal-1 redirect
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          gate = Path('native/src/rev1655_hook_gate.c')
+          text = gate.read_text()
+          old = (
+              '        if (!thunk_matches_target(thunk, expected_target)) {\n'
+              '            return AZ_REV1655_HOOK_GATE_BAD_IMPORT_THUNK;\n'
+              '        }'
+          )
+          new = (
+              '        if (!thunk_matches_target(thunk, expected_target)) {\n'
+              '            const uint8_t aurorafixer_ordinal1_redirect =\n'
+              '                thunk_index == 237u &&\n'
+              '                library == AZ_REV1655_IMPORT_LIBRARY_XBOXKRNL &&\n'
+              '                ordinal == 0x0001u &&\n'
+              '                read_u32_be(thunk) == 0x3D608801u &&\n'
+              '                read_u32_be(thunk + 4u) == 0x396B02F8u &&\n'
+              '                read_u32_be(thunk + 8u) == 0x7D6903A6u &&\n'
+              '                read_u32_be(thunk + 12u) == 0x4E800420u;\n'
+              '\n'
+              '            if (aurorafixer_ordinal1_redirect == 0u) {\n'
+              '                return AZ_REV1655_HOOK_GATE_BAD_IMPORT_THUNK;\n'
+              '            }\n'
+              '        }'
+          )
+          if old not in text:
+              raise SystemExit('hook-gate compatibility anchor missing')
+          gate.write_text(text.replace(old, new, 1))
+
+          bootstrap = Path('native/src/netdbg_bootstrap.c')
+          text = bootstrap.read_text()
+          replacements = [
+              (
+                  '#define AZ_M2A_MARKER_WORKER_ENTERED 1u\n'
+                  '#define AZ_M2A_MARKER_RUNTIME_RETURNED 2u\n'
+                  '#define AZ_M2A_RESULT_NOT_ATTEMPTED 0xFFFFFFFFu',
+                  '#define AZ_M2A_MARKER_BOOTSTRAP_ENTERED 0u\n'
+                  '#define AZ_M2A_MARKER_WORKER_ENTERED 1u\n'
+                  '#define AZ_M2A_MARKER_RUNTIME_RETURNED 2u\n'
+                  '#define AZ_M2A_MARKER_PIN_RETURNED 3u\n'
+                  '#define AZ_M2A_MARKER_THREAD_CREATE_RETURNED 4u\n'
+                  '#define AZ_M2A_RESULT_NOT_ATTEMPTED 0xFFFFFFFFu'
+              ),
+              (
+                  '            __ATOMIC_ACQUIRE)) {\n'
+                  '        return 0u;\n'
+                  '    }\n\n'
+                  '    /* Close the only unload window',
+                  '            __ATOMIC_ACQUIRE)) {\n'
+                  '        return 0u;\n'
+                  '    }\n\n'
+                  '    write_m2a_marker(\n'
+                  '        AZ_M2A_MARKER_BOOTSTRAP_ENTERED,\n'
+                  '        AZ_M2A_RESULT_NOT_ATTEMPTED);\n\n'
+                  '    /* Close the only unload window'
+              ),
+              (
+                  '    pin_result = az_rev1655_runtime_pin_module(\n'
+                  '        (uint32_t)(uintptr_t)&AuroraAZNetDbgWrite);\n'
+                  '    if (pin_result != AZ_REV1655_RUNTIME_OK) {',
+                  '    pin_result = az_rev1655_runtime_pin_module(\n'
+                  '        (uint32_t)(uintptr_t)&AuroraAZNetDbgWrite);\n'
+                  '    write_m2a_marker(\n'
+                  '        AZ_M2A_MARKER_PIN_RETURNED,\n'
+                  '        (uint32_t)pin_result);\n'
+                  '    if (pin_result != AZ_REV1655_RUNTIME_OK) {'
+              ),
+              (
+                  '    create_result = az_rev1655_thread_create(\n'
+                  '        (void *)(uintptr_t)&bootstrap_rev1655_runtime,\n'
+                  '        NULL,\n'
+                  '        &thread);\n'
+                  '    if (create_result ==',
+                  '    create_result = az_rev1655_thread_create(\n'
+                  '        (void *)(uintptr_t)&bootstrap_rev1655_runtime,\n'
+                  '        NULL,\n'
+                  '        &thread);\n'
+                  '    write_m2a_marker(\n'
+                  '        AZ_M2A_MARKER_THREAD_CREATE_RETURNED,\n'
+                  '        (uint32_t)create_result);\n'
+                  '    if (create_result =='
+              ),
+              (
+                  '        3u,\n        (uint32_t)sizeof(AzM2aMarker),',
+                  '        6u,\n        (uint32_t)sizeof(AzM2aMarker),'
+              ),
+          ]
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'bootstrap compatibility anchor missing: {old[:80]!r}')
+              text = text.replace(old, new, 1)
+          bootstrap.write_text(text)
+          PY
+          git diff --check
+
+      - name: Restore pinned OpenXeChain toolchain
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ env.OPENXECHAIN_ROOT }}
+          key: ${{ env.OPENXECHAIN_CACHE_KEY }}
+          fail-on-cache-miss: true
+
+      - name: Verify cached OpenXeChain tools
+        run: |
+          test -x "${OPENXECHAIN_ROOT}/bin/clang"
+          test -x "${OPENXECHAIN_ROOT}/bin/lld-link"
+          test -x "${OPENXECHAIN_ROOT}/bin/synthxex"
+          "${OPENXECHAIN_ROOT}/bin/clang" --version
+
+      - name: Build patched SynthXEX
+        env:
+          SYNTHXEX_SOURCE_DIR: /home/runner/work/_temp/wolf-v8a-synthxex-source
+          SYNTHXEX_BUILD_DIR: /home/runner/work/_temp/wolf-v8a-synthxex-build
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/OpenXeChain/SynthXEX.git "${SYNTHXEX_SOURCE_DIR}"
+          git -C "${SYNTHXEX_SOURCE_DIR}" checkout --detach "${OPENXECHAIN_SYNTHXEX_COMMIT}"
+          patch_file="${GITHUB_WORKSPACE}/scripts/openxechain-synthxex-image-base.patch"
+          git -C "${SYNTHXEX_SOURCE_DIR}" apply --check "${patch_file}"
+          git -C "${SYNTHXEX_SOURCE_DIR}" apply "${patch_file}"
+          cmake -S "${SYNTHXEX_SOURCE_DIR}" -B "${SYNTHXEX_BUILD_DIR}" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="${OPENXECHAIN_ROOT}"
+          cmake --build "${SYNTHXEX_BUILD_DIR}" --parallel 2
+          cmake --install "${SYNTHXEX_BUILD_DIR}"
+
+      - name: Build Wolf V8A runtime
+        run: bash scripts/build-openxechain.sh
+
+      - name: Validate Wolf V8A runtime
+        run: |
+          output_dir="${GITHUB_WORKSPACE}/build/native-xbox360"
+          test -s "${output_dir}/AuroraAZ.xex"
+          test -s "${output_dir}/AuroraAZ.xex.sha256"
+          python3 - "${output_dir}/AuroraAZ.xex" <<'PY'
+          from pathlib import Path
+          import sys
+          p = Path(sys.argv[1])
+          if p.read_bytes()[:4] != b'XEX2':
+              raise SystemExit('runtime is not XEX2')
+          print(f'validated XEX2: {p} ({p.stat().st_size} bytes)')
+          PY
+          (cd "${output_dir}" && sha256sum --check AuroraAZ.xex.sha256)
+
+      - name: Stage NetDbgDll probe
+        run: |
+          mkdir -p build/wolf-v8a-aurorafixer-compat
+          cp build/native-xbox360/AuroraAZ.xex build/wolf-v8a-aurorafixer-compat/NetDbgDll.xex
+          (cd build/wolf-v8a-aurorafixer-compat && sha256sum NetDbgDll.xex > NetDbgDll.xex.sha256)
+
+      - name: Upload Wolf V8A AuroraFixer compatibility probe
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Wolf-V8A-AuroraFixer-compat-${{ github.sha }}
+          path: build/wolf-v8a-aurorafixer-compat/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

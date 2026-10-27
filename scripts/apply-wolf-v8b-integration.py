@@ -218,10 +218,10 @@ build_path = Path("scripts/build-openxechain.sh")
 build = build_path.read_text()
 build = replace_once(
     build,
-    '    "${repo_root}/native/src/m2a_input_telemetry.c" \\\n'
+    '    "${repo_root}/native/src/m2a_input_telemetry.c"\n'
     '    "${repo_root}/native/src/rev1655_runtime.c"',
-    '    "${repo_root}/native/src/m2a_input_telemetry.c" \\\n'
-    '    "${repo_root}/native/src/wolf_idle_timer.c" \\\n'
+    '    "${repo_root}/native/src/m2a_input_telemetry.c"\n'
+    '    "${repo_root}/native/src/wolf_idle_timer.c"\n'
     '    "${repo_root}/native/src/rev1655_runtime.c"',
     "OpenXeChain source list",
 )

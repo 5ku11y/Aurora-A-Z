@@ -134,8 +134,7 @@ jobs:
 
       - name: Apply Wolf V8B idle timer integration
         run: |
-          git apply --check scripts/wolf-v8b-idle-timer.patch
-          git apply scripts/wolf-v8b-idle-timer.patch
+          python3 scripts/apply-wolf-v8b-integration.py
           git diff --check
 
       - name: Restore pinned OpenXeChain toolchain

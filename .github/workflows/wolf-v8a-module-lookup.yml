@@ -1,4 +1,4 @@
-name: Wolf V8A bootstrap trace probe
+name: Wolf V8A image gate trace probe
 
 on:
   pull_request:
@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 
-# Wolf hardware diagnostic: emit the bootstrap gate result before worker startup.
+# Wolf hardware diagnostic: emit bootstrap and exact Rev1655 image-gate results.
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -31,8 +31,8 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          path = Path("native/src/netdbg_bootstrap.c")
-          text = path.read_text()
+          bootstrap = Path("native/src/netdbg_bootstrap.c")
+          text = bootstrap.read_text()
 
           replacements = [
               (
@@ -85,6 +85,14 @@ jobs:
                   "        (uint32_t)create_result);\n"
                   "    if (create_result =="
               ),
+              (
+                  "        3u,\n        (uint32_t)sizeof(AzM2aMarker),",
+                  "        4u,\n        (uint32_t)sizeof(AzM2aMarker),"
+              ),
+              (
+                  "        diagnostics.embedded_base,",
+                  "        az_rev1655_runtime_last_hook_gate_result(),"
+              ),
           ]
 
           for old, new in replacements:
@@ -92,7 +100,71 @@ jobs:
                   raise SystemExit(f"bootstrap instrumentation anchor missing: {old[:80]!r}")
               text = text.replace(old, new, 1)
 
-          path.write_text(text)
+          bootstrap.write_text(text)
+
+          header = Path("native/include/auroraaz/rev1655_runtime.h")
+          text = header.read_text()
+          old = (
+              "uint32_t az_rev1655_runtime_observations_logged(void);\n\n"
+              "const char *az_rev1655_runtime_result_name"
+          )
+          new = (
+              "uint32_t az_rev1655_runtime_observations_logged(void);\n"
+              "uint32_t az_rev1655_runtime_last_hook_gate_result(void);\n\n"
+              "const char *az_rev1655_runtime_result_name"
+          )
+          if old not in text:
+              raise SystemExit("runtime header diagnostic anchor missing")
+          header.write_text(text.replace(old, new, 1))
+
+          runtime = Path("native/src/rev1655_runtime.c")
+          text = runtime.read_text()
+          replacements = [
+              (
+                  "    volatile uint32_t observations_logged;\n"
+                  "    volatile uint32_t lifetime_state;",
+                  "    volatile uint32_t observations_logged;\n"
+                  "    volatile uint32_t last_hook_gate_result;\n"
+                  "    volatile uint32_t lifetime_state;"
+              ),
+              (
+                  "    gate_result = az_rev1655_hook_gate_validate_with_import_resolver(\n"
+                  "        image,\n"
+                  "        &import_resolver,\n"
+                  "        &permit);\n"
+                  "    if (gate_result != AZ_REV1655_HOOK_GATE_OK) {",
+                  "    store_u32(&g_runtime.last_hook_gate_result, 0xFFFFFFFFu);\n"
+                  "    gate_result = az_rev1655_hook_gate_validate_with_import_resolver(\n"
+                  "        image,\n"
+                  "        &import_resolver,\n"
+                  "        &permit);\n"
+                  "    store_u32(\n"
+                  "        &g_runtime.last_hook_gate_result,\n"
+                  "        (uint32_t)gate_result);\n"
+                  "    if (gate_result != AZ_REV1655_HOOK_GATE_OK) {"
+              ),
+              (
+                  "uint32_t az_rev1655_runtime_observations_logged(void)\n"
+                  "{\n"
+                  "    return load_u32(&g_runtime.observations_logged);\n"
+                  "}\n\n"
+                  "const char *az_rev1655_runtime_result_name",
+                  "uint32_t az_rev1655_runtime_observations_logged(void)\n"
+                  "{\n"
+                  "    return load_u32(&g_runtime.observations_logged);\n"
+                  "}\n\n"
+                  "uint32_t az_rev1655_runtime_last_hook_gate_result(void)\n"
+                  "{\n"
+                  "    return load_u32(&g_runtime.last_hook_gate_result);\n"
+                  "}\n\n"
+                  "const char *az_rev1655_runtime_result_name"
+              ),
+          ]
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f"runtime instrumentation anchor missing: {old[:80]!r}")
+              text = text.replace(old, new, 1)
+          runtime.write_text(text)
           PY
           git diff --check
 
@@ -157,15 +229,15 @@ jobs:
 
       - name: Stage NetDbgDll probe
         run: |
-          mkdir -p build/wolf-v8a-bootstrap-trace
-          cp build/native-xbox360/AuroraAZ.xex build/wolf-v8a-bootstrap-trace/NetDbgDll.xex
-          (cd build/wolf-v8a-bootstrap-trace && sha256sum NetDbgDll.xex > NetDbgDll.xex.sha256)
+          mkdir -p build/wolf-v8a-image-gate-trace
+          cp build/native-xbox360/AuroraAZ.xex build/wolf-v8a-image-gate-trace/NetDbgDll.xex
+          (cd build/wolf-v8a-image-gate-trace && sha256sum NetDbgDll.xex > NetDbgDll.xex.sha256)
 
-      - name: Upload Wolf V8A bootstrap trace probe
+      - name: Upload Wolf V8A image gate trace probe
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: Wolf-V8A-bootstrap-trace-${{ github.sha }}
-          path: build/wolf-v8a-bootstrap-trace/*
+          name: Wolf-V8A-image-gate-trace-${{ github.sha }}
+          path: build/wolf-v8a-image-gate-trace/*
           if-no-files-found: error
           retention-days: 14
           compression-level: 0

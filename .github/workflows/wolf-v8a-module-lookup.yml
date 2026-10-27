@@ -1,4 +1,4 @@
-name: Wolf V8A module lookup probe
+name: Wolf V8A bootstrap trace probe
 
 on:
   pull_request:
@@ -23,6 +23,76 @@ jobs:
         run: |
           git apply --check scripts/wolf-v8a-module-lookup.patch
           git apply scripts/wolf-v8a-module-lookup.patch
+          git diff --check
+
+      - name: Instrument bootstrap failure marker
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("native/src/netdbg_bootstrap.c")
+          text = path.read_text()
+
+          replacements = [
+              (
+                  "#define AZ_M2A_MARKER_WORKER_ENTERED 1u\n"
+                  "#define AZ_M2A_MARKER_RUNTIME_RETURNED 2u\n"
+                  "#define AZ_M2A_RESULT_NOT_ATTEMPTED 0xFFFFFFFFu",
+                  "#define AZ_M2A_MARKER_BOOTSTRAP_ENTERED 0u\n"
+                  "#define AZ_M2A_MARKER_WORKER_ENTERED 1u\n"
+                  "#define AZ_M2A_MARKER_RUNTIME_RETURNED 2u\n"
+                  "#define AZ_M2A_MARKER_PIN_RETURNED 3u\n"
+                  "#define AZ_M2A_MARKER_THREAD_CREATE_RETURNED 4u\n"
+                  "#define AZ_M2A_RESULT_NOT_ATTEMPTED 0xFFFFFFFFu"
+              ),
+              (
+                  "            __ATOMIC_ACQUIRE)) {\n"
+                  "        return 0u;\n"
+                  "    }\n\n"
+                  "    /* Close the only unload window",
+                  "            __ATOMIC_ACQUIRE)) {\n"
+                  "        return 0u;\n"
+                  "    }\n\n"
+                  "    write_m2a_marker(\n"
+                  "        AZ_M2A_MARKER_BOOTSTRAP_ENTERED,\n"
+                  "        AZ_M2A_RESULT_NOT_ATTEMPTED);\n\n"
+                  "    /* Close the only unload window"
+              ),
+              (
+                  "    pin_result = az_rev1655_runtime_pin_module(\n"
+                  "        (uint32_t)(uintptr_t)&AuroraAZNetDbgWrite);\n"
+                  "    if (pin_result != AZ_REV1655_RUNTIME_OK) {",
+                  "    pin_result = az_rev1655_runtime_pin_module(\n"
+                  "        (uint32_t)(uintptr_t)&AuroraAZNetDbgWrite);\n"
+                  "    write_m2a_marker(\n"
+                  "        AZ_M2A_MARKER_PIN_RETURNED,\n"
+                  "        (uint32_t)pin_result);\n"
+                  "    if (pin_result != AZ_REV1655_RUNTIME_OK) {"
+              ),
+              (
+                  "    create_result = az_rev1655_thread_create(\n"
+                  "        (void *)(uintptr_t)&bootstrap_rev1655_runtime,\n"
+                  "        NULL,\n"
+                  "        &thread);\n"
+                  "    if (create_result ==",
+                  "    create_result = az_rev1655_thread_create(\n"
+                  "        (void *)(uintptr_t)&bootstrap_rev1655_runtime,\n"
+                  "        NULL,\n"
+                  "        &thread);\n"
+                  "    write_m2a_marker(\n"
+                  "        AZ_M2A_MARKER_THREAD_CREATE_RETURNED,\n"
+                  "        (uint32_t)create_result);\n"
+                  "    if (create_result =="
+              ),
+          ]
+
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f"bootstrap instrumentation anchor missing: {old[:80]!r}")
+              text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          PY
           git diff --check
 
       - name: Restore pinned OpenXeChain toolchain
@@ -86,15 +156,15 @@ jobs:
 
       - name: Stage NetDbgDll probe
         run: |
-          mkdir -p build/wolf-v8a-module-lookup
-          cp build/native-xbox360/AuroraAZ.xex build/wolf-v8a-module-lookup/NetDbgDll.xex
-          (cd build/wolf-v8a-module-lookup && sha256sum NetDbgDll.xex > NetDbgDll.xex.sha256)
+          mkdir -p build/wolf-v8a-bootstrap-trace
+          cp build/native-xbox360/AuroraAZ.xex build/wolf-v8a-bootstrap-trace/NetDbgDll.xex
+          (cd build/wolf-v8a-bootstrap-trace && sha256sum NetDbgDll.xex > NetDbgDll.xex.sha256)
 
-      - name: Upload Wolf V8A module lookup probe
+      - name: Upload Wolf V8A bootstrap trace probe
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: Wolf-V8A-module-lookup-${{ github.sha }}
-          path: build/wolf-v8a-module-lookup/*
+          name: Wolf-V8A-bootstrap-trace-${{ github.sha }}
+          path: build/wolf-v8a-bootstrap-trace/*
           if-no-files-found: error
           retention-days: 14
           compression-level: 0

@@ -14,6 +14,7 @@ jobs:
     env:
       OPENXECHAIN_ROOT: /home/runner/work/_temp/openxechain-prefix
       OPENXECHAIN_CACHE_KEY: openxechain-linux-x64-v2-eed1fa65bf9577fd31625764b320a90182ea9ade
+      OPENXECHAIN_SYNTHXEX_COMMIT: 48d1453a55468aa2f8a211db0b20edd594ef5be3
     steps:
       - name: Check out branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -38,6 +39,32 @@ jobs:
           test -x "${OPENXECHAIN_ROOT}/bin/lld-link"
           test -x "${OPENXECHAIN_ROOT}/bin/synthxex"
           "${OPENXECHAIN_ROOT}/bin/clang" --version
+
+      - name: Build patched SynthXEX
+        env:
+          SYNTHXEX_SOURCE_DIR: /home/runner/work/_temp/wolf-v8a-synthxex-source
+          SYNTHXEX_BUILD_DIR: /home/runner/work/_temp/wolf-v8a-synthxex-build
+        run: |
+          git clone --filter=blob:none --no-checkout \
+            https://github.com/OpenXeChain/SynthXEX.git \
+            "${SYNTHXEX_SOURCE_DIR}"
+          git -C "${SYNTHXEX_SOURCE_DIR}" checkout --detach \
+            "${OPENXECHAIN_SYNTHXEX_COMMIT}"
+          test "$(git -C "${SYNTHXEX_SOURCE_DIR}" rev-parse HEAD)" = \
+            "${OPENXECHAIN_SYNTHXEX_COMMIT}"
+
+          patch_file="${GITHUB_WORKSPACE}/scripts/openxechain-synthxex-image-base.patch"
+          git -C "${SYNTHXEX_SOURCE_DIR}" apply --check "${patch_file}"
+          git -C "${SYNTHXEX_SOURCE_DIR}" apply "${patch_file}"
+          git -C "${SYNTHXEX_SOURCE_DIR}" diff --check
+
+          cmake -S "${SYNTHXEX_SOURCE_DIR}" -B "${SYNTHXEX_BUILD_DIR}" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${OPENXECHAIN_ROOT}"
+          cmake --build "${SYNTHXEX_BUILD_DIR}" --parallel 2
+          cmake --install "${SYNTHXEX_BUILD_DIR}"
+          "${OPENXECHAIN_ROOT}/bin/synthxex" --version
 
       - name: Build Wolf V8A runtime
         run: bash scripts/build-openxechain.sh

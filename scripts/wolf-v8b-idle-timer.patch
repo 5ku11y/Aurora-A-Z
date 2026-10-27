@@ -1,0 +1,187 @@
+diff --git a/native/src/rev1655_runtime.c b/native/src/rev1655_runtime.c
+--- a/native/src/rev1655_runtime.c
++++ b/native/src/rev1655_runtime.c
+@@ -20,6 +20,7 @@
+ #include <auroraaz/render_detours.h>
+ #include <auroraaz/rev1655_hook_gate.h>
+ #include <auroraaz/rev1655_runtime.h>
+ #include <auroraaz/scene_gate_rev1655.h>
++#include <auroraaz/wolf_idle_timer.h>
+ 
+ #include "rev1655_hook_gate_private.h"
+ #include "rev1655_thread_private.h"
+@@ -95,6 +96,8 @@
+ #define AZ_FILTER_IDLE_STABLE_TICKS 4u
+ #define AZ_M3C_TELEMETRY_FLUSH_TICKS 20u
+ 
++#define WOLF_V8B_IDLE_MARKER_VERSION 1u
++
+ #define AZ_BROWSE_APPLY_NONE 0u
+ #define AZ_BROWSE_APPLY_BAD_PUBLICATION 1u
+ #define AZ_BROWSE_APPLY_BAD_GCM 2u
+@@ -206,8 +209,29 @@ typedef struct AzRev1655Runtime {
+     uint32_t telemetry_flush_ticks;
+     uint32_t render_telemetry_flush_ticks;
+     uint32_t m3c_telemetry_flush_ticks;
++    WolfIdleTimer wolf_idle_timer;
+ } AzRev1655Runtime;
+ 
++typedef struct WolfV8bIdleMarker {
++    uint8_t magic[4];
++    uint32_t version;
++    uint32_t record_size;
++    uint32_t threshold_ms;
++    uint32_t armed;
++    uint32_t fired;
++    uint32_t reset_count;
++    uint32_t trigger_count;
++    uint32_t elapsed_ms;
++    uint32_t last_activity_serial;
++    uint32_t last_input_frame;
++    uint32_t runtime_state;
++    uint32_t requested_stage;
++    uint32_t effective_stage;
++    uint32_t consumed_controls;
++    uint32_t observation_drops;
++} WolfV8bIdleMarker;
++
++typedef char WolfV8bIdleMarkerMustBe64Bytes[
++    sizeof(WolfV8bIdleMarker) == 64u ? 1 : -1];
++
+ typedef struct AzM2bRenderMarker {
+     uint8_t magic[4];
+     uint32_t version;
+@@ -310,6 +334,8 @@ static char g_input_telemetry_slot_a_path[] =
+     AZ_M2A_INPUT_TELEMETRY_SLOT_A_PATH;
+ static char g_input_telemetry_slot_b_path[] =
+     AZ_M2A_INPUT_TELEMETRY_SLOT_B_PATH;
++static char g_wolf_v8b_idle_marker_path[] =
++    "game:\\Data\\Logs\\WolfFactory-V8B-idle.bin";
+ #if !defined(AURORAAZ_REV1655_RUNTIME_TEST_IO)
+ static char g_render_marker_path[] =
+     "game:\\Data\\Logs\\AuroraAZ-M2b.bin";
+@@ -365,6 +391,17 @@ static void wait_for_input(void)
+     (void)KeDelayExecutionThread(0u, 0u, &interval);
+ }
+ 
++static uint64_t wolf_runtime_now_ms(void)
++{
++    int64_t now_100ns = 0;
++
++    KeQuerySystemTime(&now_100ns);
++    if (now_100ns <= 0) {
++        return 0u;
++    }
++    return (uint64_t)now_100ns / 10000u;
++}
++
+ static uint8_t write_complete_file(
+     char *path,
+     const uint8_t *bytes,
+@@ -401,6 +438,42 @@ static uint8_t write_complete_file(
+         close_succeeded != 0 ? 1u : 0u;
+ }
+ 
++static void flush_wolf_v8b_idle_marker(void)
++{
++    AzInputDetourStatus status;
++    const uint64_t now_ms = wolf_runtime_now_ms();
++    const WolfV8bIdleMarker marker = {
++        {'W', 'F', '8', 'B'},
++        WOLF_V8B_IDLE_MARKER_VERSION,
++        (uint32_t)sizeof(WolfV8bIdleMarker),
++        WOLF_IDLE_TIMER_DEFAULT_THRESHOLD_MS,
++        g_runtime.wolf_idle_timer.fired == 0u ? 1u : 0u,
++        g_runtime.wolf_idle_timer.fired != 0u ? 1u : 0u,
++        g_runtime.wolf_idle_timer.reset_count,
++        g_runtime.wolf_idle_timer.trigger_count,
++        wolf_idle_timer_elapsed_ms(&g_runtime.wolf_idle_timer, now_ms),
++        g_runtime.wolf_idle_timer.last_activity_serial,
++        g_runtime.wolf_idle_timer.last_input_frame,
++        load_u32(&g_runtime.state),
++        0u,
++        0u,
++        0u,
++        0u
++    };
++    WolfV8bIdleMarker snapshot = marker;
++
++    az_rev1655_input_detour_snapshot_status(&status);
++    snapshot.requested_stage = (uint32_t)status.requested_stage;
++    snapshot.effective_stage = (uint32_t)status.effective_stage;
++    snapshot.consumed_controls = status.consumed_controls;
++    snapshot.observation_drops = status.observation_drops;
++    if (write_complete_file(
++            g_wolf_v8b_idle_marker_path,
++            (const uint8_t *)&snapshot,
++            (uint32_t)sizeof(snapshot)) == 0u) {
++        DbgPrint("WolfFactory V8B: idle marker write failed\n");
++    }
++}
++
+ #if defined(AURORAAZ_REV1655_RUNTIME_TEST_IO)
+ void az_rev1655_runtime_test_reset_lifetime(void)
+ {
+@@ -2769,6 +2842,7 @@ static uint32_t drain_observation_pass(void)
+     while (drained < AZ_OBSERVATION_DRAIN_BUDGET) {
+         AzInputDetourObservation observation;
+         const AzInputDetourResult result =
+             az_rev1655_input_detour_take_observation(&observation);
++        uint8_t was_fired;
+ 
+         if (result == AZ_INPUT_DETOUR_NO_OBSERVATION) {
+             break;
+@@ -2782,6 +2856,17 @@ static uint32_t drain_observation_pass(void)
+             break;
+         }
+ 
++        was_fired = g_runtime.wolf_idle_timer.fired;
++        (void)wolf_idle_timer_note_activity(
++            &g_runtime.wolf_idle_timer,
++            wolf_runtime_now_ms(),
++            observation.serial,
++            observation.input_frame);
++        if (was_fired != 0u) {
++            DbgPrint("WolfFactory V8B: idle timer re-armed by input\n");
++            flush_wolf_v8b_idle_marker();
++        }
++
+         log_observation(&observation);
+         (void)az_m2a_input_telemetry_record(
+             &g_runtime.telemetry,
+@@ -2878,6 +2963,11 @@ static uint32_t input_observe_worker(void *context)
+     }
+ 
+     if (state == (uint32_t)AZ_REV1655_RUNTIME_RUNNING) {
++        wolf_idle_timer_init(
++            &g_runtime.wolf_idle_timer,
++            wolf_runtime_now_ms(),
++            WOLF_IDLE_TIMER_DEFAULT_THRESHOLD_MS);
++        flush_wolf_v8b_idle_marker();
+         DbgPrint(
+             "AuroraAZ: runtime active stage=%u input=%08X "
+             "selector-consume=enabled filter=disabled\n",
+@@ -2896,7 +2986,15 @@ static uint32_t input_observe_worker(void *context)
+ 
+     while (load_u32(&g_runtime.state) ==
+            (uint32_t)AZ_REV1655_RUNTIME_RUNNING) {
+-        (void)drain_observation_pass();
++        (void)drain_observation_pass();
++        if (wolf_idle_timer_step(
++                &g_runtime.wolf_idle_timer,
++                wolf_runtime_now_ms()) == WOLF_IDLE_TIMER_FIRED) {
++            DbgPrint("WolfFactory V8B: 12-second idle trigger fired\n");
++            flush_wolf_v8b_idle_marker();
++        }
+         flush_input_telemetry(0u);
+ #if !defined(AURORAAZ_REV1655_RUNTIME_TEST_IO)
+         settings_worker_step();
+diff --git a/scripts/build-openxechain.sh b/scripts/build-openxechain.sh
+--- a/scripts/build-openxechain.sh
++++ b/scripts/build-openxechain.sh
+@@ -37,6 +37,7 @@ m2a_sources=(
+     "${repo_root}/native/src/scene_gate_rev1655.c"
+     "${repo_root}/native/src/m2a_input_telemetry.c"
++    "${repo_root}/native/src/wolf_idle_timer.c"
+     "${repo_root}/native/src/rev1655_runtime.c"
+ )

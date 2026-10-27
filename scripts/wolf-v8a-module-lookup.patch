@@ -1,0 +1,26 @@
+diff --git a/native/src/netdbg_lifetime_rev1655.c b/native/src/netdbg_lifetime_rev1655.c
+--- a/native/src/netdbg_lifetime_rev1655.c
++++ b/native/src/netdbg_lifetime_rev1655.c
+@@ -659,7 +659,20 @@ static uint8_t default_get_module_handle(
+     if (identity == NULL || module_handle == NULL) {
+         return 0u;
+     }
++
++    /* Aurora's PluginManager identity ("dll.aurora.netdbg") is a logical
++     * module key, not necessarily the kernel loader image name.  The Wolf
++     * V8A hardware dump on Rev1655 proved the PluginManager code signatures
++     * and loader path are correct while bootstrap stopped before its first
++     * worker marker.  Preserve the logical-name lookup first, then fall back
++     * to the standalone image names produced by the build/DEF file. */
+     result = XexGetModuleHandle(identity, &handle);
++    if (FAILED(result) || handle == NULL) {
++        handle = NULL;
++        result = XexGetModuleHandle("NetDbgDll.xex", &handle);
++    }
++    if (FAILED(result) || handle == NULL) {
++        handle = NULL;
++        result = XexGetModuleHandle("AuroraAZ.dll", &handle);
++    }
+     if (FAILED(result) || handle == NULL || (uintptr_t)handle > UINT32_MAX) {
+         return 0u;
+     }

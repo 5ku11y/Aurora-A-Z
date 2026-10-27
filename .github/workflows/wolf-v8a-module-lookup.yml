@@ -1,4 +1,4 @@
-name: Wolf V8A image gate trace probe
+name: Wolf V8A bad import thunk trace probe
 
 on:
   pull_request:
@@ -7,7 +7,8 @@ on:
 permissions:
   contents: read
 
-# Wolf hardware diagnostic: emit bootstrap and exact Rev1655 image-gate results.
+# Wolf hardware diagnostic: report the first live import thunk that differs
+# from the authoritative XAM/xboxkrnl resolver target. No gate is bypassed.
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -26,7 +27,7 @@ jobs:
           git apply scripts/wolf-v8a-module-lookup.patch
           git diff --check
 
-      - name: Instrument bootstrap failure marker
+      - name: Instrument bootstrap and bad import thunk diagnostics
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -35,6 +36,13 @@ jobs:
           text = bootstrap.read_text()
 
           replacements = [
+              (
+                  "#include <auroraaz/hook_runtime.h>\n"
+                  "#include <auroraaz/rev1655_runtime.h>",
+                  "#include <auroraaz/hook_runtime.h>\n"
+                  "#include <auroraaz/rev1655_hook_gate.h>\n"
+                  "#include <auroraaz/rev1655_runtime.h>"
+              ),
               (
                   "#define AZ_M2A_MARKER_WORKER_ENTERED 1u\n"
                   "#define AZ_M2A_MARKER_RUNTIME_RETURNED 2u\n"
@@ -87,11 +95,23 @@ jobs:
               ),
               (
                   "        3u,\n        (uint32_t)sizeof(AzM2aMarker),",
-                  "        4u,\n        (uint32_t)sizeof(AzM2aMarker),"
+                  "        5u,\n        (uint32_t)sizeof(AzM2aMarker),"
               ),
               (
-                  "        diagnostics.embedded_base,",
-                  "        az_rev1655_runtime_last_hook_gate_result(),"
+                  "        diagnostics.embedded_base,\n"
+                  "        diagnostics.validation_failures,\n"
+                  "        diagnostics.protection_before,\n"
+                  "        diagnostics.protection_after,\n"
+                  "        diagnostics.target_address,\n"
+                  "        diagnostics.target_protection_before,\n"
+                  "        diagnostics.target_protection_after",
+                  "        az_rev1655_hook_gate_bad_import_index(),\n"
+                  "        az_rev1655_hook_gate_bad_import_library(),\n"
+                  "        az_rev1655_hook_gate_bad_import_ordinal(),\n"
+                  "        az_rev1655_hook_gate_bad_import_live_target(),\n"
+                  "        az_rev1655_hook_gate_bad_import_expected_target(),\n"
+                  "        az_rev1655_hook_gate_bad_import_word0(),\n"
+                  "        az_rev1655_hook_gate_bad_import_word1()"
               ),
           ]
 
@@ -99,72 +119,123 @@ jobs:
               if old not in text:
                   raise SystemExit(f"bootstrap instrumentation anchor missing: {old[:80]!r}")
               text = text.replace(old, new, 1)
-
           bootstrap.write_text(text)
 
-          header = Path("native/include/auroraaz/rev1655_runtime.h")
+          header = Path("native/include/auroraaz/rev1655_hook_gate.h")
           text = header.read_text()
           old = (
-              "uint32_t az_rev1655_runtime_observations_logged(void);\n\n"
-              "const char *az_rev1655_runtime_result_name"
+              "const char *az_rev1655_hook_gate_result_name(\n"
+              "    AzRev1655HookGateResult result);"
           )
           new = (
-              "uint32_t az_rev1655_runtime_observations_logged(void);\n"
-              "uint32_t az_rev1655_runtime_last_hook_gate_result(void);\n\n"
-              "const char *az_rev1655_runtime_result_name"
+              "uint32_t az_rev1655_hook_gate_bad_import_index(void);\n"
+              "uint32_t az_rev1655_hook_gate_bad_import_library(void);\n"
+              "uint32_t az_rev1655_hook_gate_bad_import_ordinal(void);\n"
+              "uint32_t az_rev1655_hook_gate_bad_import_live_target(void);\n"
+              "uint32_t az_rev1655_hook_gate_bad_import_expected_target(void);\n"
+              "uint32_t az_rev1655_hook_gate_bad_import_word0(void);\n"
+              "uint32_t az_rev1655_hook_gate_bad_import_word1(void);\n\n"
+              "const char *az_rev1655_hook_gate_result_name(\n"
+              "    AzRev1655HookGateResult result);"
           )
           if old not in text:
-              raise SystemExit("runtime header diagnostic anchor missing")
+              raise SystemExit("hook-gate header diagnostic anchor missing")
           header.write_text(text.replace(old, new, 1))
 
-          runtime = Path("native/src/rev1655_runtime.c")
-          text = runtime.read_text()
+          gate = Path("native/src/rev1655_hook_gate.c")
+          text = gate.read_text()
           replacements = [
               (
-                  "    volatile uint32_t observations_logged;\n"
-                  "    volatile uint32_t lifetime_state;",
-                  "    volatile uint32_t observations_logged;\n"
-                  "    volatile uint32_t last_hook_gate_result;\n"
-                  "    volatile uint32_t lifetime_state;"
+                  "static struct AzRev1655HookPermit g_permit;",
+                  "static struct AzRev1655HookPermit g_permit;\n"
+                  "static uint32_t g_bad_import_index = UINT32_MAX;\n"
+                  "static uint32_t g_bad_import_library = UINT32_MAX;\n"
+                  "static uint32_t g_bad_import_ordinal = UINT32_MAX;\n"
+                  "static uint32_t g_bad_import_live_target = 0u;\n"
+                  "static uint32_t g_bad_import_expected_target = 0u;\n"
+                  "static uint32_t g_bad_import_word0 = 0u;\n"
+                  "static uint32_t g_bad_import_word1 = 0u;"
               ),
               (
-                  "    gate_result = az_rev1655_hook_gate_validate_with_import_resolver(\n"
-                  "        image,\n"
-                  "        &import_resolver,\n"
-                  "        &permit);\n"
-                  "    if (gate_result != AZ_REV1655_HOOK_GATE_OK) {",
-                  "    store_u32(&g_runtime.last_hook_gate_result, 0xFFFFFFFFu);\n"
-                  "    gate_result = az_rev1655_hook_gate_validate_with_import_resolver(\n"
-                  "        image,\n"
-                  "        &import_resolver,\n"
-                  "        &permit);\n"
-                  "    store_u32(\n"
-                  "        &g_runtime.last_hook_gate_result,\n"
-                  "        (uint32_t)gate_result);\n"
-                  "    if (gate_result != AZ_REV1655_HOOK_GATE_OK) {"
+                  "    revoke_permit();\n"
+                  "    if (out_permit != NULL) {",
+                  "    revoke_permit();\n"
+                  "    g_bad_import_index = UINT32_MAX;\n"
+                  "    g_bad_import_library = UINT32_MAX;\n"
+                  "    g_bad_import_ordinal = UINT32_MAX;\n"
+                  "    g_bad_import_live_target = 0u;\n"
+                  "    g_bad_import_expected_target = 0u;\n"
+                  "    g_bad_import_word0 = 0u;\n"
+                  "    g_bad_import_word1 = 0u;\n"
+                  "    if (out_permit != NULL) {"
               ),
               (
-                  "uint32_t az_rev1655_runtime_observations_logged(void)\n"
+                  "        if (!thunk_matches_target(thunk, expected_target)) {\n"
+                  "            return AZ_REV1655_HOOK_GATE_BAD_IMPORT_THUNK;\n"
+                  "        }",
+                  "        if (!thunk_matches_target(thunk, expected_target)) {\n"
+                  "            const uint32_t word0 = read_u32_be(thunk);\n"
+                  "            const uint32_t word1 = read_u32_be(thunk + 4u);\n"
+                  "            const uint32_t low = word1 & 0xFFFFu;\n"
+                  "            uint32_t high = (word0 & 0xFFFFu) << 16u;\n\n"
+                  "            if ((low & 0x8000u) != 0u) {\n"
+                  "                high -= 0x10000u;\n"
+                  "            }\n"
+                  "            g_bad_import_index = (uint32_t)thunk_index;\n"
+                  "            g_bad_import_library = (uint32_t)library;\n"
+                  "            g_bad_import_ordinal = (uint32_t)ordinal;\n"
+                  "            g_bad_import_expected_target = expected_target;\n"
+                  "            g_bad_import_word0 = word0;\n"
+                  "            g_bad_import_word1 = word1;\n"
+                  "            if ((word0 & 0xFFFF0000u) == 0x3D600000u &&\n"
+                  "                (word1 & 0xFFFF0000u) == 0x396B0000u &&\n"
+                  "                read_u32_be(thunk + 8u) == 0x7D6903A6u &&\n"
+                  "                read_u32_be(thunk + 12u) == 0x4E800420u) {\n"
+                  "                g_bad_import_live_target = high + low;\n"
+                  "            }\n"
+                  "            return AZ_REV1655_HOOK_GATE_BAD_IMPORT_THUNK;\n"
+                  "        }"
+              ),
+              (
+                  "const char *az_rev1655_hook_gate_result_name(\n"
+                  "    AzRev1655HookGateResult result)",
+                  "uint32_t az_rev1655_hook_gate_bad_import_index(void)\n"
                   "{\n"
-                  "    return load_u32(&g_runtime.observations_logged);\n"
+                  "    return g_bad_import_index;\n"
                   "}\n\n"
-                  "const char *az_rev1655_runtime_result_name",
-                  "uint32_t az_rev1655_runtime_observations_logged(void)\n"
+                  "uint32_t az_rev1655_hook_gate_bad_import_library(void)\n"
                   "{\n"
-                  "    return load_u32(&g_runtime.observations_logged);\n"
+                  "    return g_bad_import_library;\n"
                   "}\n\n"
-                  "uint32_t az_rev1655_runtime_last_hook_gate_result(void)\n"
+                  "uint32_t az_rev1655_hook_gate_bad_import_ordinal(void)\n"
                   "{\n"
-                  "    return load_u32(&g_runtime.last_hook_gate_result);\n"
+                  "    return g_bad_import_ordinal;\n"
                   "}\n\n"
-                  "const char *az_rev1655_runtime_result_name"
+                  "uint32_t az_rev1655_hook_gate_bad_import_live_target(void)\n"
+                  "{\n"
+                  "    return g_bad_import_live_target;\n"
+                  "}\n\n"
+                  "uint32_t az_rev1655_hook_gate_bad_import_expected_target(void)\n"
+                  "{\n"
+                  "    return g_bad_import_expected_target;\n"
+                  "}\n\n"
+                  "uint32_t az_rev1655_hook_gate_bad_import_word0(void)\n"
+                  "{\n"
+                  "    return g_bad_import_word0;\n"
+                  "}\n\n"
+                  "uint32_t az_rev1655_hook_gate_bad_import_word1(void)\n"
+                  "{\n"
+                  "    return g_bad_import_word1;\n"
+                  "}\n\n"
+                  "const char *az_rev1655_hook_gate_result_name(\n"
+                  "    AzRev1655HookGateResult result)"
               ),
           ]
           for old, new in replacements:
               if old not in text:
-                  raise SystemExit(f"runtime instrumentation anchor missing: {old[:80]!r}")
+                  raise SystemExit(f"hook-gate instrumentation anchor missing: {old[:80]!r}")
               text = text.replace(old, new, 1)
-          runtime.write_text(text)
+          gate.write_text(text)
           PY
           git diff --check
 
@@ -229,15 +300,15 @@ jobs:
 
       - name: Stage NetDbgDll probe
         run: |
-          mkdir -p build/wolf-v8a-image-gate-trace
-          cp build/native-xbox360/AuroraAZ.xex build/wolf-v8a-image-gate-trace/NetDbgDll.xex
-          (cd build/wolf-v8a-image-gate-trace && sha256sum NetDbgDll.xex > NetDbgDll.xex.sha256)
+          mkdir -p build/wolf-v8a-bad-import-trace
+          cp build/native-xbox360/AuroraAZ.xex build/wolf-v8a-bad-import-trace/NetDbgDll.xex
+          (cd build/wolf-v8a-bad-import-trace && sha256sum NetDbgDll.xex > NetDbgDll.xex.sha256)
 
-      - name: Upload Wolf V8A image gate trace probe
+      - name: Upload Wolf V8A bad import thunk trace probe
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: Wolf-V8A-image-gate-trace-${{ github.sha }}
-          path: build/wolf-v8a-image-gate-trace/*
+          name: Wolf-V8A-bad-import-trace-${{ github.sha }}
+          path: build/wolf-v8a-bad-import-trace/*
           if-no-files-found: error
           retention-days: 14
           compression-level: 0

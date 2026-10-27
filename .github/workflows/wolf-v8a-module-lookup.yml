@@ -1,9 +1,7 @@
 name: Wolf V8A module lookup probe
 
 on:
-  push:
-    branches:
-      - wolf-v8a-resident-probe
+  pull_request:
   workflow_dispatch:
 
 permissions:

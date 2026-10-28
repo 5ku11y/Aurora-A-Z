@@ -85,16 +85,6 @@ runtime = replace_once(
     "dashboard pause restores five-minute start",
 )
 
-# The old V8B diagnostic was tied to the original 12-second prototype. Keep the
-# diagnostic accurate now that the first threshold is five minutes and repeats
-# are four seconds.
-runtime = replace_once(
-    runtime,
-    '                "WolfFactory V8B: 12-second idle trigger fired\\n");\n',
-    '                "WolfFactory V8B: idle trigger fired\\n");\n',
-    "generic idle-trigger diagnostic",
-)
-
 # Once the first five-minute move fires, an untouched dashboard becomes the
 # proven carousel: one additional synthetic DPAD_LEFT every four seconds. Real
 # input or leaving the dashboard resets this back to five minutes.

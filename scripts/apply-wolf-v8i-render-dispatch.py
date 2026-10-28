@@ -86,4 +86,9 @@ exec(compile(v8k_fix_script.read_text(), str(v8k_fix_script), "exec"), {"__name_
 v8l_script = Path("scripts/apply-wolf-v8l-known-good-xur.py")
 exec(compile(v8l_script.read_text(), str(v8l_script), "exec"), {"__name__": "__main__"})
 
-print("Wolf V8I/V8J render dispatch + V8K path probe + V8L known-good XUR smoke applied")
+# V8M moves the A/B test to the actual Aurora 0.7b.2/Nova HudScene generation:
+# an XUIB v8 GameInfoScene.xur, tested both in-place and as an exact Data copy.
+v8m_script = Path("scripts/apply-wolf-v8m-official-xur-probe.py")
+exec(compile(v8m_script.read_text(), str(v8m_script), "exec"), {"__name__": "__main__"})
+
+print("Wolf V8I/V8J render dispatch + V8K/V8L diagnostics + V8M official XUR probe applied")

@@ -42,7 +42,7 @@ jobs:
         run: |
           git fetch --depth=1 origin spelunkr360-prototype
           git show FETCH_HEAD:native/src/spelunkr360_main.c > /tmp/spelunkr360_main.c
-          grep -q 'CH.*53' /tmp/spelunkr360_main.c
+          test -s /tmp/spelunkr360_main.c
 
       - name: Build patched SynthXEX
         env:

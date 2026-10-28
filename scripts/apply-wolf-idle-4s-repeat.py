@@ -24,21 +24,31 @@ runtime = replace_once(
     "telemetry active threshold",
 )
 
-# Startup must begin as a fresh five-minute idle session too.
-runtime = replace_once(
-    runtime,
-    '        wolf_idle_timer_init(\n'
-    '            &g_runtime.wolf_idle_timer,\n'
-    '            wolf_runtime_now_ms(),\n'
-    '            WOLF_IDLE_TIMER_DEFAULT_THRESHOLD_MS);\n'
-    '        flush_wolf_v8b_idle_marker();\n',
-    '        wolf_idle_timer_init(\n'
-    '            &g_runtime.wolf_idle_timer,\n'
-    '            wolf_runtime_now_ms(),\n'
-    '            300000u);\n'
-    '        DbgPrint("WolfFactory FINAL: 5-minute initial idle armed\\n");\n'
-    '        flush_wolf_v8b_idle_marker();\n',
-    "startup five-minute idle",
+# Startup must begin as a fresh five-minute idle session too. Find the timer
+# initialization call directly so this survives later Wolf runtime edits around
+# the call site.
+init_call = 'wolf_idle_timer_init('
+init_pos = runtime.find(init_call)
+if init_pos < 0:
+    raise SystemExit("Wolf idle 4s anchor missing: timer initialization call")
+init_end = runtime.find(');', init_pos)
+if init_end < 0:
+    raise SystemExit("Wolf idle 4s anchor missing: timer initialization end")
+threshold_pos = runtime.find(
+    'WOLF_IDLE_TIMER_DEFAULT_THRESHOLD_MS', init_pos, init_end
+)
+if threshold_pos < 0:
+    raise SystemExit("Wolf idle 4s anchor missing: startup threshold")
+runtime = (
+    runtime[:threshold_pos]
+    + '300000u'
+    + runtime[threshold_pos + len('WOLF_IDLE_TIMER_DEFAULT_THRESHOLD_MS'):]
+)
+init_end = runtime.find(');', init_pos) + 2
+runtime = (
+    runtime[:init_end]
+    + '\n        DbgPrint("WolfFactory FINAL: 5-minute initial idle armed\\n");'
+    + runtime[init_end:]
 )
 
 # Any real controller activity starts a brand-new idle session: wait five

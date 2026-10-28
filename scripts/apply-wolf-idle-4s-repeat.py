@@ -14,13 +14,6 @@ runtime = runtime_path.read_text()
 # Final Lazy Susan timing: a fresh idle session waits five minutes before the
 # first automatic move. After that first move, untouched coverflow continues
 # at the already hardware-proven four-second cadence.
-runtime = replace_once(
-    runtime,
-    '#define WOLF_V8B_IDLE_MARKER_VERSION 1u\n\n',
-    '#define WOLF_V8B_IDLE_MARKER_VERSION 1u\n'
-    '#define WOLF_IDLE_INITIAL_THRESHOLD_MS 300000u\n\n',
-    "five-minute initial threshold",
-)
 
 # Report the currently active interval instead of always claiming the original
 # default threshold.
@@ -42,7 +35,7 @@ runtime = replace_once(
     '        wolf_idle_timer_init(\n'
     '            &g_runtime.wolf_idle_timer,\n'
     '            wolf_runtime_now_ms(),\n'
-    '            WOLF_IDLE_INITIAL_THRESHOLD_MS);\n'
+    '            300000u);\n'
     '        DbgPrint("WolfFactory FINAL: 5-minute initial idle armed\\n");\n'
     '        flush_wolf_v8b_idle_marker();\n',
     "startup five-minute idle",
@@ -63,8 +56,7 @@ runtime = replace_once(
     '                wolf_runtime_now_ms(),\n'
     '                observation.serial,\n'
     '                observation.input_frame);\n'
-    '            g_runtime.wolf_idle_timer.threshold_ms =\n'
-    '                WOLF_IDLE_INITIAL_THRESHOLD_MS;\n'
+    '            g_runtime.wolf_idle_timer.threshold_ms = 300000u;\n'
     '            az_rev1655_input_detour_cancel_synthetic_key();\n',
     "real input restores five-minute start",
 )
@@ -76,8 +68,7 @@ runtime = replace_once(
     '                g_runtime.wolf_idle_timer.last_activity_ms = now_ms;\n'
     '                g_runtime.wolf_idle_timer.fired = 0u;\n'
     '                az_rev1655_input_detour_cancel_synthetic_key();\n',
-    '                g_runtime.wolf_idle_timer.threshold_ms =\n'
-    '                    WOLF_IDLE_INITIAL_THRESHOLD_MS;\n'
+    '                g_runtime.wolf_idle_timer.threshold_ms = 300000u;\n'
     '                g_runtime.wolf_idle_timer.last_activity_ms = now_ms;\n'
     '                g_runtime.wolf_idle_timer.fired = 0u;\n'
     '                az_rev1655_input_detour_cancel_synthetic_key();\n',

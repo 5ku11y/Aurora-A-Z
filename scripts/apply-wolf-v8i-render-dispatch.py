@@ -91,4 +91,10 @@ exec(compile(v8l_script.read_text(), str(v8l_script), "exec"), {"__name__": "__m
 v8m_script = Path("scripts/apply-wolf-v8m-official-xur-probe.py")
 exec(compile(v8m_script.read_text(), str(v8m_script), "exec"), {"__name__": "__main__"})
 
-print("Wolf V8I/V8J render dispatch + V8K/V8L diagnostics + V8M official XUR probe applied")
+# V8N mutates four equal-length string-table entries in the exact V8M-passing
+# XUIB v8 scene, preserving all offsets while proving a customized Wolf-owned
+# v8 asset is accepted by the same native XUI loader.
+v8n_script = Path("scripts/apply-wolf-v8n-custom-v8-xur.py")
+exec(compile(v8n_script.read_text(), str(v8n_script), "exec"), {"__name__": "__main__"})
+
+print("Wolf V8I/V8J render dispatch + V8K/V8L diagnostics + V8M/V8N XUR v8 probes applied")

@@ -11,6 +11,7 @@ on:
 permissions:
   contents: read
 
+# V8Q cache refresh: all OpenXeChain components remain pinned by immutable commit.
 jobs:
   warm:
     runs-on: ubuntu-24.04

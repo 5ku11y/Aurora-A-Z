@@ -70,4 +70,9 @@ bootstrap = replace_once(
 )
 bootstrap_path.write_text(bootstrap)
 
-print("Wolf V8I render-thread dispatch + V8J overlay-stage bootstrap applied")
+# V8K is chained here so the cache-warmed V8J workflow applies the XUR/path
+# diagnostics without changing workflow/cache scope again.
+v8k_script = Path("scripts/apply-wolf-v8k-xur-path-probe.py")
+exec(compile(v8k_script.read_text(), str(v8k_script), "exec"), {"__name__": "__main__"})
+
+print("Wolf V8I render dispatch + V8J overlay stage + V8K XUR/path probe applied")

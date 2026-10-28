@@ -97,4 +97,10 @@ exec(compile(v8m_script.read_text(), str(v8m_script), "exec"), {"__name__": "__m
 v8n_script = Path("scripts/apply-wolf-v8n-custom-v8-xur.py")
 exec(compile(v8n_script.read_text(), str(v8n_script), "exec"), {"__name__": "__main__"})
 
-print("Wolf V8I/V8J render dispatch + V8K/V8L diagnostics + V8M/V8N XUR v8 probes applied")
+# V8O is the first visible native scene test. It creates the V8N custom-v8
+# asset, navigates forward from the scene-gate-verified Aurora_Main handle,
+# leaves it visible for ~180 render frames, then navigates back automatically.
+v8o_script = Path("scripts/apply-wolf-v8o-visible-native-scene.py")
+exec(compile(v8o_script.read_text(), str(v8o_script), "exec"), {"__name__": "__main__"})
+
+print("Wolf V8I/V8J render dispatch + V8K/V8L diagnostics + V8M/V8N/V8O native XUI probes applied")

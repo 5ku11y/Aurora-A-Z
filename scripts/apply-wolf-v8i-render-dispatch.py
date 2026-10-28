@@ -133,4 +133,10 @@ exec(compile(final_fix_script.read_text(), str(final_fix_script), "exec"), {"__n
 final_script = Path("scripts/apply-wolf-final-idle-key.py")
 exec(compile(final_script.read_text(), str(final_script), "exec"), {"__name__": "__main__"})
 
-print("Wolf V8 chain + FINAL dashboard idle synthetic-left route applied")
+# Keep the proven 12-second first idle move, then rotate one cover every four
+# seconds until real controller input or leaving coverflow starts a fresh idle
+# session and restores the 12-second initial delay.
+idle_4s_script = Path("scripts/apply-wolf-idle-4s-repeat.py")
+exec(compile(idle_4s_script.read_text(), str(idle_4s_script), "exec"), {"__name__": "__main__"})
+
+print("Wolf V8 chain + FINAL idle route: 12-second start / 4-second repeat")

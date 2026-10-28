@@ -208,8 +208,10 @@ static void flush_wolf_v8b_idle_marker(void)
 runtime = replace_once(
     runtime,
     '        flush_wolf_v8b_idle_marker();\n'
+    '        write_wolf_v8e_xui_resolver_marker();\n'
     '        DbgPrint(',
     '        flush_wolf_v8b_idle_marker();\n'
+    '        write_wolf_v8e_xui_resolver_marker();\n'
     '        wolf_v8h_write_trace(0u, 0u, 0u, 0xFFFFFFFFu, 0u, 0u, 0xFFFFFFFFu);\n'
     '        DbgPrint(',
     "startup loaded trace",

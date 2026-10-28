@@ -81,4 +81,9 @@ exec(compile(v8k_script.read_text(), str(v8k_script), "exec"), {"__name__": "__m
 v8k_fix_script = Path("scripts/fix-wolf-v8k-init-anchor.py")
 exec(compile(v8k_fix_script.read_text(), str(v8k_fix_script), "exec"), {"__name__": "__main__"})
 
-print("Wolf V8I render dispatch + V8J overlay stage + V8K XUR/path probe applied")
+# V8L A/B tests the same native XUI loader against a tiny classless XUR taken
+# directly from XboxUnity/AuroraScripts after both Wolf XUR path forms fail.
+v8l_script = Path("scripts/apply-wolf-v8l-known-good-xur.py")
+exec(compile(v8l_script.read_text(), str(v8l_script), "exec"), {"__name__": "__main__"})
+
+print("Wolf V8I/V8J render dispatch + V8K path probe + V8L known-good XUR smoke applied")

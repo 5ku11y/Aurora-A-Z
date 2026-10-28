@@ -1,0 +1,109 @@
+name: Wolf V8G OpenXeChain cache warm
+
+on:
+  push:
+    branches:
+      - wolf-v8g-create-probe
+    paths:
+      - .github/workflows/wolf-v8g-warm-toolchain.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# V8Q cache refresh: all OpenXeChain components remain pinned by immutable commit.
+# WolfIdle 12s/4s refresh: rewarm the same pinned cache after hosted cache expiry.
+jobs:
+  warm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    env:
+      OPENXECHAIN_BUILDSCRIPT_COMMIT: eed1fa65bf9577fd31625764b320a90182ea9ade
+      OPENXECHAIN_LLVM_COMMIT: 890b83f6c8259a8899e182a5f7d9cf39c64131cc
+      OPENXECHAIN_NEWLIB_COMMIT: f929633c27099d404e9cb5b2739a9c7f9b6afccc
+      OPENXECHAIN_SYNTHXEX_COMMIT: 48d1453a55468aa2f8a211db0b20edd594ef5be3
+      OPENXECHAIN_XECORELIB_COMMIT: c65d67e071357acade681f04c46ae9719797f239
+      OPENXECHAIN_ROOT: /home/runner/work/_temp/openxechain-prefix
+      OPENXECHAIN_CACHE_KEY: openxechain-linux-x64-v2-eed1fa65bf9577fd31625764b320a90182ea9ade
+
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Reclaim runner disk space
+        run: |
+          sudo rm -rf -- \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /opt/hostedtoolcache
+          df -h /
+
+      - name: Install host build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            bash binutils build-essential bzip2 ca-certificates clang cmake \
+            findutils gawk git gzip make ninja-build python3 python3-yaml \
+            sed tar unzip zip zlib1g-dev zstd
+
+      - name: Restore pinned OpenXeChain toolchain
+        id: toolchain-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ env.OPENXECHAIN_ROOT }}
+          key: ${{ env.OPENXECHAIN_CACHE_KEY }}
+
+      - name: Fetch pinned OpenXeChain sources
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        env:
+          SOURCE_DIR: /home/runner/work/_temp/openxechain-source
+        run: |
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git clone --filter=blob:none --no-checkout \
+            https://github.com/OpenXeChain/buildscript.git "${SOURCE_DIR}"
+          git -C "${SOURCE_DIR}" checkout --detach "${OPENXECHAIN_BUILDSCRIPT_COMMIT}"
+          git -C "${SOURCE_DIR}" submodule sync --recursive
+          git -C "${SOURCE_DIR}" submodule update --init --recursive --depth 1 --jobs 4
+          test "$(git -C "${SOURCE_DIR}" rev-parse HEAD)" = "${OPENXECHAIN_BUILDSCRIPT_COMMIT}"
+          test "$(git -C "${SOURCE_DIR}/llvm" rev-parse HEAD)" = "${OPENXECHAIN_LLVM_COMMIT}"
+          test "$(git -C "${SOURCE_DIR}/newlib" rev-parse HEAD)" = "${OPENXECHAIN_NEWLIB_COMMIT}"
+          test "$(git -C "${SOURCE_DIR}/synthxex" rev-parse HEAD)" = "${OPENXECHAIN_SYNTHXEX_COMMIT}"
+          test "$(git -C "${SOURCE_DIR}/xecorelib" rev-parse HEAD)" = "${OPENXECHAIN_XECORELIB_COMMIT}"
+
+      - name: Apply pinned Newlib preprocessor fix
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        env:
+          SOURCE_DIR: /home/runner/work/_temp/openxechain-source
+        run: |
+          patch_file="${GITHUB_WORKSPACE}/scripts/openxechain-newlib-cpp.patch"
+          git -C "${SOURCE_DIR}" apply --check "${patch_file}"
+          git -C "${SOURCE_DIR}" apply "${patch_file}"
+          git -C "${SOURCE_DIR}" diff --check
+
+      - name: Build pinned OpenXeChain toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        env:
+          PREFIX: /home/runner/work/_temp/openxechain-prefix
+          SOURCE_DIR: /home/runner/work/_temp/openxechain-source
+          PARALLEL: 4
+          BUILD_TYPE: Release
+          HOST_CC: clang
+          HOST_CXX: clang++
+        run: |
+          cd "${SOURCE_DIR}"
+          ./build-toolchain.sh
+
+      - name: Verify OpenXeChain tools
+        run: |
+          test -x "${OPENXECHAIN_ROOT}/bin/clang"
+          test -x "${OPENXECHAIN_ROOT}/bin/lld-link"
+          test -x "${OPENXECHAIN_ROOT}/bin/synthxex"
+          "${OPENXECHAIN_ROOT}/bin/clang" --version
+
+      - name: Save pinned OpenXeChain toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ env.OPENXECHAIN_ROOT }}
+          key: ${{ env.OPENXECHAIN_CACHE_KEY }}

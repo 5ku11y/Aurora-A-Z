@@ -67,8 +67,8 @@ static void test_default_threshold(void)
     WolfIdleTimer timer;
 
     wolf_idle_timer_init(&timer, 0u, 0u);
-    assert(timer.threshold_ms == 12000u);
-    assert(wolf_idle_timer_elapsed_ms(&timer, 12000u) == 12000u);
+    assert(timer.threshold_ms == 300000u);
+    assert(wolf_idle_timer_elapsed_ms(&timer, 300000u) == 300000u);
 }
 
 int main(void)

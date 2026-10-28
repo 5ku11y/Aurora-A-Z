@@ -33,6 +33,7 @@ jobs:
           python3 -m py_compile scripts/apply-wolf-v8e-xui-resolver.py
           python3 -m py_compile scripts/apply-wolf-v8f-native-scene.py
           python3 -m py_compile scripts/apply-wolf-v8g-create-probe.py
+          python3 -m py_compile scripts/apply-wolf-v8i-render-dispatch.py
 
       - name: Apply Wolf V8A module lookup patch
         run: |
@@ -163,6 +164,13 @@ jobs:
           grep -q 'wolf_v8f_try_native_scene(0u)' native/src/rev1655_runtime.c
           git diff --check
 
+      - name: Apply Wolf V8I render-thread dispatch
+        run: |
+          python3 scripts/apply-wolf-v8i-render-dispatch.py
+          grep -q 'wolf_v8i_render_ui_tick' native/src/rev1655_runtime.c
+          grep -q 'wolf_v8i_render_ui_tick' native/src/render_detours.c
+          git diff --check
+
       - name: Restore pinned OpenXeChain toolchain
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
@@ -215,7 +223,7 @@ jobs:
           ):
               if needle not in data:
                   raise SystemExit(f'missing expected V8G string: {needle!r}')
-          print(f'validated V8G create-probe XEX2: {p} ({p.stat().st_size} bytes)')
+          print(f'validated V8G/V8I create-probe XEX2: {p} ({p.stat().st_size} bytes)')
           PY
           (cd "${output_dir}" && sha256sum --check AuroraAZ.xex.sha256)
 
@@ -228,7 +236,7 @@ jobs:
       - name: Upload Wolf V8G create probe
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: Wolf-V8G-create-probe-${{ github.sha }}
+          name: Wolf-V8I-render-dispatch-${{ github.sha }}
           path: build/wolf-v8g-create-probe/*
           if-no-files-found: error
           retention-days: 14

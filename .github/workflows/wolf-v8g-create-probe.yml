@@ -34,6 +34,8 @@ jobs:
           python3 -m py_compile scripts/apply-wolf-v8f-native-scene.py
           python3 -m py_compile scripts/apply-wolf-v8g-create-probe.py
           python3 -m py_compile scripts/apply-wolf-v8i-render-dispatch.py
+          python3 -m py_compile scripts/apply-wolf-v8p-direct-xui-overlay.py
+          python3 -m py_compile scripts/apply-wolf-v8q-final-render-probe.py
 
       - name: Apply Wolf V8A module lookup patch
         run: |
@@ -169,6 +171,7 @@ jobs:
           python3 scripts/apply-wolf-v8i-render-dispatch.py
           grep -q 'wolf_v8i_render_ui_tick' native/src/rev1655_runtime.c
           grep -q 'wolf_v8i_render_ui_tick' native/src/render_detours.c
+          grep -q 'WolfFactory-V8Q-render.bin' native/src/rev1655_runtime.c
           git diff --check
 
       - name: Restore pinned OpenXeChain toolchain
@@ -218,12 +221,13 @@ jobs:
               b'WolfFactory-V8B-idle.bin',
               b'WolfFactory-V8E-xui.bin',
               b'WolfFactory-V8G-create.bin',
+              b'WolfFactory-V8Q-render.bin',
               b'AuroraAZ_Settings.xur',
               b'xam.xex',
           ):
               if needle not in data:
-                  raise SystemExit(f'missing expected V8G string: {needle!r}')
-          print(f'validated V8G/V8I create-probe XEX2: {p} ({p.stat().st_size} bytes)')
+                  raise SystemExit(f'missing expected V8Q string: {needle!r}')
+          print(f'validated V8Q final-render XEX2: {p} ({p.stat().st_size} bytes)')
           PY
           (cd "${output_dir}" && sha256sum --check AuroraAZ.xex.sha256)
 

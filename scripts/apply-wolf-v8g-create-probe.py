@@ -41,7 +41,7 @@ runtime = runtime.replace(
 runtime = replace_once(
     runtime,
     '    if (parent_scene != 0u && create_fn != NULL && navigate_fn != NULL) {',
-    '    if (create_fn != NULL) {',
+    '    (void)navigate_fn;\n    if (create_fn != NULL) {',
     "create without parent scene",
 )
 

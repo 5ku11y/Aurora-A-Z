@@ -75,4 +75,10 @@ bootstrap_path.write_text(bootstrap)
 v8k_script = Path("scripts/apply-wolf-v8k-xur-path-probe.py")
 exec(compile(v8k_script.read_text(), str(v8k_script), "exec"), {"__name__": "__main__"})
 
+# The first V8K draft used a generic marker initializer anchor. Correct that
+# generated placement before the Xbox compile so initialization lives only in
+# wolf_v8f_try_native_scene().
+v8k_fix_script = Path("scripts/fix-wolf-v8k-init-anchor.py")
+exec(compile(v8k_fix_script.read_text(), str(v8k_fix_script), "exec"), {"__name__": "__main__"})
+
 print("Wolf V8I render dispatch + V8J overlay stage + V8K XUR/path probe applied")

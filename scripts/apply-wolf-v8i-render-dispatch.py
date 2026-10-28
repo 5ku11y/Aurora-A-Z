@@ -110,10 +110,15 @@ exec(compile(v8o_script.read_text(), str(v8o_script), "exec"), {"__name__": "__m
 v8p_script = Path("scripts/apply-wolf-v8p-direct-xui-overlay.py")
 exec(compile(v8p_script.read_text(), str(v8p_script), "exec"), {"__name__": "__main__"})
 
-# V8Q leaves both invisible XUI experiments disabled and drives the known-good
-# final Font::End renderer directly with a giant solid-pixel panel for 240
-# frames. This is the first visibility proof of the production render route.
+# V8Q proves the renderer submits 240/240 frames, but those pixels are hidden by
+# Aurora's original Font::End running afterward.
 v8q_script = Path("scripts/apply-wolf-v8q-final-render-probe.py")
 exec(compile(v8q_script.read_text(), str(v8q_script), "exec"), {"__name__": "__main__"})
 
-print("Wolf V8I/V8J render dispatch + V8K/V8L diagnostics + V8M/V8N/V8O/V8P/V8Q probes applied")
+# V8R opens a fresh Wolf-only Font batch after Aurora's original End returns,
+# draws the same proven panel, then closes that batch through the original End
+# trampoline. This tests render ordering without changing the renderer itself.
+v8r_script = Path("scripts/apply-wolf-v8r-post-font-batch.py")
+exec(compile(v8r_script.read_text(), str(v8r_script), "exec"), {"__name__": "__main__"})
+
+print("Wolf V8I/V8J render dispatch + V8K/V8L diagnostics + V8M/V8N/V8O/V8P/V8Q/V8R probes applied")

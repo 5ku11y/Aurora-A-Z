@@ -4,7 +4,7 @@ from pathlib import Path
 
 def replace_once(text: str, old: str, new: str, label: str) -> str:
     if old not in text:
-        raise SystemExit(f"Wolf V8I render-dispatch anchor missing: {label}")
+        raise SystemExit(f"Wolf V8I/V8J render-dispatch anchor missing: {label}")
     return text.replace(old, new, 1)
 
 
@@ -12,10 +12,10 @@ runtime_path = Path("native/src/rev1655_runtime.c")
 runtime = runtime_path.read_text()
 
 # V8H proved that the worker arms wolf_v8f_scene_pending, but the input-driven
-# module_ui_tick never consumes it on normal coverflow.  V8I exposes a tiny
+# module_ui_tick never consumes it on normal coverflow. V8I exposes a tiny
 # render-thread dispatcher that reuses the already-proven render detour instead
-# of depending on controller polling.  The atomic exchange preserves the
-# one-shot behavior if the old input tick happens to run at the same time.
+# of depending on controller polling. The atomic exchange preserves one-shot
+# behavior if another dispatch path happens to run at the same time.
 runtime = replace_once(
     runtime,
     'static void module_ui_tick(void *context)\n{\n',
@@ -53,4 +53,21 @@ render = replace_once(
 )
 
 render_path.write_text(render)
-print("Wolf V8I render-thread native XUI dispatch applied")
+
+# V8J root-cause fix: the bootstrap was still starting INPUT_OBSERVE, which
+# never installs render_menu/font_end/settings hooks. V8I therefore compiled
+# correctly but its render dispatcher was unreachable on hardware. Start the
+# existing OVERLAY_CANARY stage so those already revision-gated hooks are live.
+bootstrap_path = Path("native/src/netdbg_bootstrap.c")
+bootstrap = bootstrap_path.read_text()
+bootstrap = replace_once(
+    bootstrap,
+    "    result = az_rev1655_runtime_start(\n"
+    "        AZ_REV1655_RUNTIME_STAGE_INPUT_OBSERVE);",
+    "    result = az_rev1655_runtime_start(\n"
+    "        AZ_REV1655_RUNTIME_STAGE_OVERLAY_CANARY);",
+    "overlay-canary bootstrap stage",
+)
+bootstrap_path.write_text(bootstrap)
+
+print("Wolf V8I render-thread dispatch + V8J overlay-stage bootstrap applied")

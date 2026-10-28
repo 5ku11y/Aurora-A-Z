@@ -103,4 +103,11 @@ exec(compile(v8n_script.read_text(), str(v8n_script), "exec"), {"__name__": "__m
 v8o_script = Path("scripts/apply-wolf-v8o-visible-native-scene.py")
 exec(compile(v8o_script.read_text(), str(v8o_script), "exec"), {"__name__": "__main__"})
 
-print("Wolf V8I/V8J render dispatch + V8K/V8L diagnostics + V8M/V8N/V8O native XUI probes applied")
+# V8P bypasses the Nova/HudScene asset and scene navigation entirely. It creates
+# a built-in XuiText object, configures it, attaches it directly to Aurora_Main,
+# and removes it after a short visible proof. V8O itself is disabled so its
+# existing hardware marker is preserved for later decoding.
+v8p_script = Path("scripts/apply-wolf-v8p-direct-xui-overlay.py")
+exec(compile(v8p_script.read_text(), str(v8p_script), "exec"), {"__name__": "__main__"})
+
+print("Wolf V8I/V8J render dispatch + V8K/V8L diagnostics + V8M/V8N/V8O/V8P native XUI probes applied")

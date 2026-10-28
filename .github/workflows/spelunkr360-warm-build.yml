@@ -1,0 +1,111 @@
+name: Spelunkr360 warm-cache build
+
+on:
+  push:
+    branches:
+      - wolf-v8g-create-probe
+    paths:
+      - .github/workflows/spelunkr360-warm-build.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      OPENXECHAIN_ROOT: /home/runner/work/_temp/openxechain-prefix
+      OPENXECHAIN_CACHE_KEY: openxechain-linux-x64-v2-eed1fa65bf9577fd31625764b320a90182ea9ade
+      OPENXECHAIN_SYNTHXEX_COMMIT: 48d1453a55468aa2f8a211db0b20edd594ef5be3
+
+    steps:
+      - name: Check out warm-cache branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Restore proven OpenXeChain cache
+        id: toolchain-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ env.OPENXECHAIN_ROOT }}
+          key: ${{ env.OPENXECHAIN_CACHE_KEY }}
+          fail-on-cache-miss: true
+
+      - name: Verify OpenXeChain tools
+        run: |
+          test -x "${OPENXECHAIN_ROOT}/bin/clang"
+          test -x "${OPENXECHAIN_ROOT}/bin/synthxex"
+          "${OPENXECHAIN_ROOT}/bin/clang" --version
+
+      - name: Fetch Spelunkr360 source branch
+        run: |
+          git fetch --depth=1 origin spelunkr360-prototype
+          git show FETCH_HEAD:native/src/spelunkr360_main.c > /tmp/spelunkr360_main.c
+          grep -q 'CH.*53' /tmp/spelunkr360_main.c
+
+      - name: Build patched SynthXEX
+        env:
+          SYNTHXEX_SOURCE_DIR: /home/runner/work/_temp/spelunkr360-synthxex-source
+          SYNTHXEX_BUILD_DIR: /home/runner/work/_temp/spelunkr360-synthxex-build
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/OpenXeChain/SynthXEX.git "${SYNTHXEX_SOURCE_DIR}"
+          git -C "${SYNTHXEX_SOURCE_DIR}" checkout --detach "${OPENXECHAIN_SYNTHXEX_COMMIT}"
+          patch_file="${GITHUB_WORKSPACE}/scripts/openxechain-synthxex-image-base.patch"
+          git -C "${SYNTHXEX_SOURCE_DIR}" apply --check "${patch_file}"
+          git -C "${SYNTHXEX_SOURCE_DIR}" apply "${patch_file}"
+          cmake -S "${SYNTHXEX_SOURCE_DIR}" -B "${SYNTHXEX_BUILD_DIR}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="${OPENXECHAIN_ROOT}"
+          cmake --build "${SYNTHXEX_BUILD_DIR}" --parallel 2
+          cmake --install "${SYNTHXEX_BUILD_DIR}"
+
+      - name: Build Spelunkr360 title
+        run: |
+          mkdir -p build/spelunkr360
+          "${OPENXECHAIN_ROOT}/bin/clang" \
+            -std=c99 -Oz -fno-zero-initialized-in-bss \
+            -Wall -Wextra -Werror \
+            -Inative/include \
+            /tmp/spelunkr360_main.c \
+            -Wl,/entry:main \
+            -Wl,/base:0x82D50000 \
+            -Wl,/filealign:128 \
+            -Wl,/align:65536 \
+            -Wl,/opt:ref \
+            -o build/spelunkr360/Spelunkr360.dll
+          "${OPENXECHAIN_ROOT}/bin/synthxex" \
+            -t title \
+            -i build/spelunkr360/Spelunkr360.dll \
+            -o build/spelunkr360/Spelunkr360.xex
+          sha256sum build/spelunkr360/Spelunkr360.xex > build/spelunkr360/Spelunkr360.xex.sha256
+
+      - name: Validate Spelunkr360 XEX
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('build/spelunkr360/Spelunkr360.xex')
+          data = p.read_bytes()
+          if data[:4] != b'XEX2':
+              raise SystemExit('Spelunkr360 is not XEX2')
+          for needle in (
+              b'Spelunkr360 - CH 53 TOONERTIA ready',
+              b'game:\\index.html',
+              b'game:\\cover.png',
+              b'Spelunkr360 - returning to Aurora',
+          ):
+              if needle not in data:
+                  raise SystemExit(f'missing Spelunkr360 marker: {needle!r}')
+          print(f'validated Spelunkr360 XEX2: {p} ({p.stat().st_size} bytes)')
+          PY
+          (cd build/spelunkr360 && sha256sum --check Spelunkr360.xex.sha256)
+
+      - name: Upload Spelunkr360 XEX
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Spelunkr360-${{ github.sha }}
+          path: |
+            build/spelunkr360/Spelunkr360.xex
+            build/spelunkr360/Spelunkr360.xex.sha256
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

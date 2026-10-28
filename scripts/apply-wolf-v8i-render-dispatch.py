@@ -121,4 +121,11 @@ exec(compile(v8q_script.read_text(), str(v8q_script), "exec"), {"__name__": "__m
 v8r_script = Path("scripts/apply-wolf-v8r-post-font-batch.py")
 exec(compile(v8r_script.read_text(), str(v8r_script), "exec"), {"__name__": "__main__"})
 
-print("Wolf V8I/V8J render dispatch + V8K/V8L diagnostics + V8M/V8N/V8O/V8P/V8Q/V8R probes applied")
+# FINAL: abandon custom visual injection. The dashboard keeps rendering itself;
+# after the proven idle timer expires, publish one synthetic DPAD_LEFT only into
+# an otherwise-empty Aurora keystroke poll. The Aurora_Main focus gate and live
+# input-loop check pause the timer in Settings/games/other scenes.
+final_script = Path("scripts/apply-wolf-final-idle-key.py")
+exec(compile(final_script.read_text(), str(final_script), "exec"), {"__name__": "__main__"})
+
+print("Wolf V8 chain + FINAL dashboard idle synthetic-left route applied")

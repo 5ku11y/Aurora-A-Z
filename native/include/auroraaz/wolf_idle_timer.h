@@ -7,7 +7,11 @@
 extern "C" {
 #endif
 
-#define WOLF_IDLE_TIMER_DEFAULT_THRESHOLD_MS 12000u
+/* Final WolfIdle behavior: a fresh idle session waits five minutes before
+ * automation begins. The runtime intentionally switches to 4000 ms only after
+ * the first automatic cover move, and any real activity/scene reset restores
+ * this default. */
+#define WOLF_IDLE_TIMER_DEFAULT_THRESHOLD_MS 300000u
 
 typedef enum WolfIdleTimerResult {
     WOLF_IDLE_TIMER_WAITING = 0,

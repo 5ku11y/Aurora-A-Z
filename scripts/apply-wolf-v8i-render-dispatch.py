@@ -121,6 +121,11 @@ exec(compile(v8q_script.read_text(), str(v8q_script), "exec"), {"__name__": "__m
 v8r_script = Path("scripts/apply-wolf-v8r-post-font-batch.py")
 exec(compile(v8r_script.read_text(), str(v8r_script), "exec"), {"__name__": "__main__"})
 
+# The generated runtime acquired later V8 fields after WolfIdleTimer, so repair
+# the final script's original struct-end assumption before applying it.
+final_fix_script = Path("scripts/fix-wolf-final-runtime-anchor.py")
+exec(compile(final_fix_script.read_text(), str(final_fix_script), "exec"), {"__name__": "__main__"})
+
 # FINAL: abandon custom visual injection. The dashboard keeps rendering itself;
 # after the proven idle timer expires, publish one synthetic DPAD_LEFT only into
 # an otherwise-empty Aurora keystroke poll. The Aurora_Main focus gate and live

@@ -1,4 +1,4 @@
-name: Spelunkr360 V6B manifest-chain probe
+name: Spelunkr360 V6C whats-on-now probe
 
 on:
   push:
@@ -17,6 +17,7 @@ jobs:
       XSDK_COMMIT: 8c58c7a3fb37bb261c5a11a8a1f4fa8a8bfd0d28
       CURL_XENON_COMMIT: a6b70bd06820e1c625f47fe0e592e08c5daaa6b4
       MBEDTLS_XENON_COMMIT: 591b04adbec4bc5582649601f4407506a610162b
+      SPELUNKR_REF_COMMIT: 926d9a7cab0186cc2530dce2fc35a3eb4b2a35af
       XSDK_ROOT: /home/runner/work/_temp/xsdk-source
       CURL_XENON_ROOT: /home/runner/work/_temp/curl-xenon
       MBEDTLS_XENON_ROOT: /home/runner/work/_temp/mbedtls-xenon
@@ -33,6 +34,116 @@ jobs:
           sudo apt-get install --yes --no-install-recommends \
             build-essential bison flex texinfo libgmp-dev libmpfr-dev libmpc-dev \
             curl xz-utils patch python3 cmake ninja-build git
+
+      - name: Verify V6C scheduler parity against live Spelunkr
+        run: |
+          set -euo pipefail
+          gcc -std=c17 -O2 -Wall -Wextra -Werror \
+            native/spelunkr360_v6c/host_parity.c \
+            native/spelunkr360_v6c/schedule_core.c \
+            -o /tmp/v6c-parity
+
+          BUCKET='https://jbuopkuluyfjwgsrigry.supabase.co/storage/v1/object/public/broadcast/'
+          curl -fsSL "${BUCKET}lineup.json" -o /tmp/lineup.json
+
+          python3 - <<'PY'
+          import json, time
+          from pathlib import Path
+          lineup = json.loads(Path('/tmp/lineup.json').read_text())
+          ch = next(c for c in lineup['channels'] if c.get('dial') == 53)
+          now = int(time.time() * 1000)
+          versions = ch.get('versions', [])
+          current = None
+          for p in versions:
+              eff = p.get('effectiveAtMs', p.get('epochMs', 0))
+              if eff <= now and (current is None or eff > current.get('effectiveAtMs', current.get('epochMs', 0))):
+                  current = p
+          if current is None:
+              current = min(versions, key=lambda p: (p.get('effectiveAtMs', p.get('epochMs', 0)), -p.get('v', 0)))
+          Path('/tmp/now_ms').write_text(str(now))
+          Path('/tmp/pointer.json').write_text(json.dumps(current, separators=(',', ':')))
+          Path('/tmp/manifest_path').write_text(current['manifest'])
+          print('parity timestamp', now, 'pointer', current)
+          PY
+
+          MANIFEST_PATH="$(cat /tmp/manifest_path)"
+          curl -fsSL "${BUCKET}${MANIFEST_PATH}" -o /tmp/manifest.json
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          m = json.loads(Path('/tmp/manifest.json').read_text())
+          if m.get('engine') != 5:
+              raise SystemExit(f"V6C only supports engine 5, live engine={m.get('engine')}")
+          if m.get('block') or m.get('ads'):
+              raise SystemExit('V6C exact core intentionally refuses block/ad schedule shapes')
+          path = m.get('platform')
+          if not path:
+              raise SystemExit('live TOONERTIA manifest has no platform path')
+          Path('/tmp/platform_path').write_text(path)
+          PY
+
+          PLATFORM_PATH="$(cat /tmp/platform_path)"
+          curl -fsSL "${BUCKET}${PLATFORM_PATH}" -o /tmp/platform.json
+          NOW_MS="$(cat /tmp/now_ms)"
+          /tmp/v6c-parity /tmp/lineup.json /tmp/manifest.json /tmp/platform.json "${NOW_MS}" > /tmp/c-result.txt
+
+          git clone --filter=blob:none --no-checkout https://github.com/kr8vka0z/jellyfin-plugin-spelunkr.git /tmp/spelunkr-ref
+          git -C /tmp/spelunkr-ref checkout --detach "${SPELUNKR_REF_COMMIT}"
+          test "$(git -C /tmp/spelunkr-ref rev-parse HEAD)" = "${SPELUNKR_REF_COMMIT}"
+
+          cat >/tmp/spelunkr-ref/v6c-parity.mjs <<'JS'
+          import fs from 'node:fs';
+          import { createChannel, addChannelVersion, segmentAt } from './Jellyfin.Plugin.Spelunkr/Schedule/schedule.js';
+          const lineup = JSON.parse(fs.readFileSync('/tmp/lineup.json', 'utf8'));
+          const pointer = JSON.parse(fs.readFileSync('/tmp/pointer.json', 'utf8'));
+          const manifestText = fs.readFileSync('/tmp/manifest.json', 'utf8');
+          const platformText = fs.readFileSync('/tmp/platform.json', 'utf8');
+          const now = Number(fs.readFileSync('/tmp/now_ms', 'utf8'));
+          const entry = lineup.channels.find(c => c.dial === 53);
+          const channel = createChannel(entry.id);
+          addChannelVersion(channel, manifestText, platformText, JSON.stringify(pointer));
+          const seg = JSON.parse(segmentAt(channel, now, lineup.audioBase || ''));
+          const line = (k, v) => console.log(`${k}=${v ?? ''}`);
+          line('kind', seg.kind);
+          line('version', seg.version);
+          line('cycle', seg.cycle);
+          line('entry', seg.index);
+          line('start', seg.startMs);
+          line('length', seg.lengthMs);
+          line('offset', seg.offsetMs);
+          line('id', seg.kind === 'show' ? seg.id : '');
+          line('title', seg.kind === 'show' ? seg.title : '');
+          line('url', seg.kind === 'show' ? seg.url : '');
+          line('bumpid', seg.kind === 'bump' ? seg.id : '');
+          JS
+
+          node /tmp/spelunkr-ref/v6c-parity.mjs > /tmp/js-result.txt
+          echo '--- C V6C result ---'
+          cat /tmp/c-result.txt
+          echo '--- Official Spelunkr engine result ---'
+          cat /tmp/js-result.txt
+
+          python3 - <<'PY'
+          from pathlib import Path
+          def load(path):
+              out = {}
+              for line in Path(path).read_text().splitlines():
+                  if '=' in line:
+                      k, v = line.split('=', 1)
+                      out[k] = v
+              return out
+          c = load('/tmp/c-result.txt')
+          js = load('/tmp/js-result.txt')
+          keys = ['kind', 'version', 'cycle', 'entry', 'start', 'length', 'offset']
+          keys += ['id', 'title', 'url'] if js.get('kind') == 'show' else ['bumpid']
+          bad = [(k, c.get(k), js.get(k)) for k in keys if c.get(k) != js.get(k)]
+          if bad:
+              for k, cv, jv in bad:
+                  print(f'MISMATCH {k}: C={cv!r} official={jv!r}')
+              raise SystemExit('V6C scheduler parity failed')
+          print('V6C SCHEDULER PARITY: PASS')
+          PY
 
       - name: Fetch pinned xsdk and network libraries
         run: |
@@ -84,18 +195,18 @@ jobs:
           make -C "${XSDK_ROOT}" -j4 TOOLCHAIN="${XSDK_TOOLCHAIN}/bin/powerpc-xsdk-elf-"
           test -f "${XSDK_ROOT}/build/libxsdk.a"
 
-      - name: Build Spelunkr360 V6B manifest chain probe
+      - name: Build Spelunkr360 V6C exact whats-on-now probe
         run: |
-          cmake -S native/spelunkr360_v6b -B build/spelunkr360_v6b -G Ninja \
+          cmake -S native/spelunkr360_v6c -B build/spelunkr360_v6c -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="${XSDK_ROOT}/cmake/xsdk.cmake" \
             -DXSDK_TOOLCHAIN="${XSDK_TOOLCHAIN}" \
             -DMBEDTLS_XENON_DIR="${MBEDTLS_XENON_ROOT}" \
             -DCURL_XENON_DIR="${CURL_XENON_ROOT}" \
             -DCMAKE_BUILD_TYPE=Release
-          cmake --build build/spelunkr360_v6b
-          sha256sum build/spelunkr360_v6b/Spelunkr360V6B.xex > build/spelunkr360_v6b/Spelunkr360V6B.xex.sha256
+          cmake --build build/spelunkr360_v6c
+          sha256sum build/spelunkr360_v6c/Spelunkr360V6C.xex > build/spelunkr360_v6c/Spelunkr360V6C.xex.sha256
 
-      - name: Validate Spelunkr360 V6B package
+      - name: Validate Spelunkr360 V6C package
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -104,12 +215,12 @@ jobs:
           TITLE_ID = 0x53503601
           EXECUTION_ID_HEADER = 0x00040006
           RESOURCE_INFO_HEADER = 0x000002FF
-          p = Path('build/spelunkr360_v6b/Spelunkr360V6B.xex')
-          ca = Path('build/spelunkr360_v6b/cacert.pem')
+          p = Path('build/spelunkr360_v6c/Spelunkr360V6C.xex')
+          ca = Path('build/spelunkr360_v6c/cacert.pem')
           data = p.read_bytes()
 
           if data[:4] != b'XEX2':
-              raise SystemExit('Spelunkr360 V6B is not XEX2')
+              raise SystemExit('Spelunkr360 V6C is not XEX2')
 
           count = struct.unpack_from('>I', data, 0x14)[0]
           headers = {}
@@ -119,24 +230,24 @@ jobs:
 
           execution_offset = headers.get(EXECUTION_ID_HEADER)
           if execution_offset is None:
-              raise SystemExit('Spelunkr360 V6B has no Execution ID')
+              raise SystemExit('Spelunkr360 V6C has no Execution ID')
           title_id = struct.unpack_from('>I', data, execution_offset + 12)[0]
           if title_id != TITLE_ID:
               raise SystemExit(f'wrong TitleID: {title_id:08X}')
 
           resource_offset = headers.get(RESOURCE_INFO_HEADER)
           if resource_offset is None:
-              raise SystemExit('Spelunkr360 V6B has no XEX resource-info header')
+              raise SystemExit('Spelunkr360 V6C has no XEX resource-info header')
           resource_name = data[resource_offset + 4:resource_offset + 12]
           resource_size = struct.unpack_from('>I', data, resource_offset + 16)[0]
           if resource_name != b'53503601' or resource_size == 0:
-              raise SystemExit('Spelunkr360 V6B dashboard title resource is invalid')
+              raise SystemExit('Spelunkr360 V6C dashboard title resource is invalid')
 
           for marker in (
-              b'Spelunkr360', b'SPELUNKR360 V6B', b'MANIFEST CHAIN PROBE',
-              b'lineup.json', b'TOONERTIA', b'MANIFEST HTTP', b'PROGRAM ITEMS',
-              b'FIRST TITLE', b'ARCHIVE ID', b'PLATFORM FOUND',
-              b'TOONERTIA MANIFEST TEST: %s', b'LIVE PRESENT: A', b'LIVE PRESENT: B'):
+              b'Spelunkr360', b'SPELUNKR360 V6C', b"WHAT'S ON NOW",
+              b'TOONERTIA', b'CURRENT SEGMENT', b'NOW PLAYING', b'POSITION',
+              b'ARCHIVE ID', b'MEDIA URL FOUND', b"WHAT'S ON NOW TEST: PASS",
+              b'LIVE PRESENT: A', b'LIVE PRESENT: B'):
               if marker not in data:
                   raise SystemExit(f'missing marker {marker!r}')
 
@@ -148,16 +259,16 @@ jobs:
               f'XDBF={resource_name.decode()}, CA={ca.stat().st_size} bytes'
           )
           PY
-          sha256sum --check build/spelunkr360_v6b/Spelunkr360V6B.xex.sha256
+          sha256sum --check build/spelunkr360_v6c/Spelunkr360V6C.xex.sha256
 
-      - name: Upload Spelunkr360 V6B
+      - name: Upload Spelunkr360 V6C
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: Spelunkr360-V6B-${{ github.sha }}
+          name: Spelunkr360-V6C-${{ github.sha }}
           path: |
-            build/spelunkr360_v6b/Spelunkr360V6B.xex
-            build/spelunkr360_v6b/Spelunkr360V6B.xex.sha256
-            build/spelunkr360_v6b/cacert.pem
+            build/spelunkr360_v6c/Spelunkr360V6C.xex
+            build/spelunkr360_v6c/Spelunkr360V6C.xex.sha256
+            build/spelunkr360_v6c/cacert.pem
           if-no-files-found: error
           retention-days: 14
           compression-level: 0

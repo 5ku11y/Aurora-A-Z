@@ -128,9 +128,6 @@ jobs:
             --extra-cflags='-O2 -fno-strict-aliasing' \
             --extra-libs='-lm'
 
-          # FFmpeg's target-os=none probes cannot execute target binaries and
-          # mis-detect a few functions already supplied by xsdk's newlib.
-          # Correct only those generated feature results before compilation.
           python3 - <<'PY'
           from pathlib import Path
           p = Path('config.h')
@@ -162,6 +159,7 @@ jobs:
 
       - name: Build Spelunkr360 V7A live video frame probe
         run: |
+          set -euo pipefail
           cmake -S native/spelunkr360_v7a -B build/spelunkr360_v7a -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="${XSDK_ROOT}/cmake/xsdk.cmake" \
             -DXSDK_TOOLCHAIN="${XSDK_TOOLCHAIN}" \
@@ -169,7 +167,16 @@ jobs:
             -DCURL_XENON_DIR="${CURL_XENON_ROOT}" \
             -DFFMPEG_XSDK_DIR="${FFMPEG_PREFIX}" \
             -DCMAKE_BUILD_TYPE=Release
-          cmake --build build/spelunkr360_v7a
+
+          set +e
+          cmake --build build/spelunkr360_v7a > /tmp/v7a-build.log 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo '--- V7A COMPILE/LINK ERRORS ---'
+            grep -E 'FAILED:|fatal error:|error:|undefined reference|ld:' /tmp/v7a-build.log | tail -200 || true
+            exit "$rc"
+          fi
           sha256sum build/spelunkr360_v7a/Spelunkr360V7A.xex > build/spelunkr360_v7a/Spelunkr360V7A.xex.sha256
 
       - name: Validate Spelunkr360 V7A package

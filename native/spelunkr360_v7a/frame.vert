@@ -1,6 +1,9 @@
 #version 450
 layout(location = 0) in vec4 a_position;
-layout(location = 1) in vec2 a_uv;
+/* xsdk's GLSL vertex-input convention maps location 2 to TEXCOORD0.
+ * Location 1 is COLOR0, so using it for UVs makes
+ * xsdk_shader_set_vertex_layout() reject the layout on real hardware. */
+layout(location = 2) in vec2 a_uv;
 layout(location = 0) out vec2 v_uv;
 
 void main()

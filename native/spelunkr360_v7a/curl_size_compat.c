@@ -10,6 +10,9 @@ struct range_probe {
     curl_off_t total;
 };
 
+/* GNU ld --wrap supplies this alias for the real libcurl symbol. */
+CURLcode __real_curl_easy_getinfo(CURL *curl, CURLINFO info, ...);
+
 static unsigned char lower_ascii(unsigned char c)
 {
     return (c >= 'A' && c <= 'Z') ? (unsigned char)(c + ('a' - 'A')) : c;
@@ -100,7 +103,7 @@ static curl_off_t probe_total_size(const char *url)
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &probe);
 
     rc = curl_easy_perform(curl);
-    (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http);
+    (void)__real_curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http);
     curl_easy_cleanup(curl);
 
     if (probe.total > 0 && http == 206)
@@ -110,10 +113,10 @@ static curl_off_t probe_total_size(const char *url)
     return -1;
 }
 
-/* main.c is compiled with curl_easy_getinfo renamed to this wrapper. All
- * ordinary getinfo requests pass straight through. Only a missing media
- * Content-Length is repaired by probing bytes=0-0 and reading Content-Range. */
-CURLcode v7a_curl_easy_getinfo(CURL *curl, CURLINFO info, ...)
+/* GNU ld redirects ordinary curl_easy_getinfo references here. All queries
+ * pass through unchanged except a missing Content-Length, where we probe
+ * bytes=0-0 and recover the total from Content-Range. */
+CURLcode __wrap_curl_easy_getinfo(CURL *curl, CURLINFO info, ...)
 {
     va_list args;
     void *out;
@@ -125,12 +128,12 @@ CURLcode v7a_curl_easy_getinfo(CURL *curl, CURLINFO info, ...)
     if (out == NULL)
         return CURLE_BAD_FUNCTION_ARGUMENT;
 
-    rc = curl_easy_getinfo(curl, info, out);
+    rc = __real_curl_easy_getinfo(curl, info, out);
     if (info == CURLINFO_CONTENT_LENGTH_DOWNLOAD_T && rc == CURLE_OK) {
         curl_off_t *length = out;
         if (*length <= 0) {
             char *effective_url = NULL;
-            if (curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &effective_url) == CURLE_OK && effective_url != NULL) {
+            if (__real_curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &effective_url) == CURLE_OK && effective_url != NULL) {
                 const curl_off_t probed = probe_total_size(effective_url);
                 if (probed > 0)
                     *length = probed;

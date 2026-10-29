@@ -33,15 +33,28 @@ set_target_properties(sp7_avformat PROPERTIES IMPORTED_LOCATION "${FFMPEG_XSDK_D
 set_target_properties(sp7_avcodec PROPERTIES IMPORTED_LOCATION "${FFMPEG_XSDK_DIR}/lib/libavcodec.a")
 set_target_properties(sp7_avutil PROPERTIES IMPORTED_LOCATION "${FFMPEG_XSDK_DIR}/lib/libavutil.a")
 
+set(V7A_PATCHED_MAIN "${CMAKE_CURRENT_BINARY_DIR}/main_range_open.c")
+execute_process(
+  COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/patch_range_open.py"
+          "${CMAKE_CURRENT_SOURCE_DIR}/main.c" "${V7A_PATCHED_MAIN}"
+  RESULT_VARIABLE V7A_PATCH_RESULT
+  OUTPUT_VARIABLE V7A_PATCH_STDOUT
+  ERROR_VARIABLE V7A_PATCH_STDERR
+)
+if(NOT V7A_PATCH_RESULT EQUAL 0)
+  message(FATAL_ERROR "V7A range-open source generation failed: ${V7A_PATCH_STDERR}")
+endif()
+message(STATUS "${V7A_PATCH_STDOUT}")
+
 add_executable(Spelunkr360V7A
-  main.c
-  curl_size_compat.c
+  "${V7A_PATCHED_MAIN}"
   newlib_compat.c
   ../spelunkr360_v6c/schedule_core.c
 )
 set_target_properties(Spelunkr360V7A PROPERTIES C_STANDARD 17 C_EXTENSIONS ON)
 target_include_directories(Spelunkr360V7A PRIVATE
   "${FFMPEG_XSDK_DIR}/include"
+  "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CMAKE_CURRENT_SOURCE_DIR}/../spelunkr360_v6c"
 )
 target_link_libraries(Spelunkr360V7A PRIVATE
@@ -51,11 +64,8 @@ target_link_libraries(Spelunkr360V7A PRIVATE
   sp7_avcodec
   sp7_avutil
 )
-# Intercept curl_easy_getinfo at link time rather than redefining libcurl's
-# public type-checking macro. The wrapper only repairs missing media length.
-target_link_options(Spelunkr360V7A PRIVATE -Wl,--wrap=curl_easy_getinfo)
 target_compile_options(Spelunkr360V7A PRIVATE -Wall -Wextra -Werror -O2)
 xsdk_add_shaders(Spelunkr360V7A frame.vert frame.frag)
-xsdk_add_xex(Spelunkr360V7A TITLE_ID 0x53503601 NAME "Spelunkr360" VERSION 0.7.0.3)
+xsdk_add_xex(Spelunkr360V7A TITLE_ID 0x53503601 NAME "Spelunkr360" VERSION 0.7.0.4)
 
 configure_file("${MBEDTLS_XENON_DIR}/programs/xsdk/cacert.pem" cacert.pem COPYONLY)

@@ -66,6 +66,6 @@ target_link_libraries(Spelunkr360V7A PRIVATE
 )
 target_compile_options(Spelunkr360V7A PRIVATE -Wall -Wextra -Werror -O2)
 xsdk_add_shaders(Spelunkr360V7A frame.vert frame.frag)
-xsdk_add_xex(Spelunkr360V7A TITLE_ID 0x53503601 NAME "Spelunkr360" VERSION 0.7.0.4)
+xsdk_add_xex(Spelunkr360V7A TITLE_ID 0x53503601 NAME "Spelunkr360" VERSION 0.7.0.5)
 
-configure_file("${MBEDTLS_XENON_DIR}/programs/xsdk/cacert.pem" cacert.pem COPYONLY)
+configure_file("${MBEDTLS_XENON_DIR}/programs/xsdk/cacert.pem" ca.pem COPYONLY)

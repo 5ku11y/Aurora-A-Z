@@ -68,9 +68,8 @@ static size_t probe_body(char *data, size_t size, size_t count, void *user)
     const size_t length = size * count;
     (void)data;
     (void)user;
-    /* A valid bytes=0-0 response should only contain one byte. If a server
-     * ignores Range and starts streaming the whole object, abort immediately
-     * instead of downloading a multi-gigabyte video just to discover size. */
+    /* bytes=0-0 should only contain one byte. If a server ignores Range,
+     * abort rather than stream a multi-gigabyte video just to discover size. */
     return length <= 8u ? length : 0u;
 }
 
@@ -95,7 +94,7 @@ static curl_off_t probe_total_size(const char *url)
     curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 30000L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 15L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Spelunkr360/0.7.0-rangefix (Xbox 360 homebrew)");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Spelunkr360/0.7.0-rangefix2 (Xbox 360 homebrew)");
     curl_easy_setopt(curl, CURLOPT_RANGE, "0-0");
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, probe_header);
     curl_easy_setopt(curl, CURLOPT_HEADERDATA, &probe);
@@ -113,9 +112,11 @@ static curl_off_t probe_total_size(const char *url)
     return -1;
 }
 
-/* GNU ld redirects ordinary curl_easy_getinfo references here. All queries
- * pass through unchanged except a missing Content-Length, where we probe
- * bytes=0-0 and recover the total from Content-Range. */
+/* curl-xenon may not implement the newer CURLINFO_CONTENT_LENGTH_DOWNLOAD_T
+ * query even though the header exposes it. The previous wrapper only probed
+ * when that query returned CURLE_OK, which meant an unsupported getinfo path
+ * skipped the range fallback completely. Always repair this one query when
+ * the returned length is unavailable OR the underlying getinfo call fails. */
 CURLcode __wrap_curl_easy_getinfo(CURL *curl, CURLINFO info, ...)
 {
     va_list args;
@@ -129,14 +130,17 @@ CURLcode __wrap_curl_easy_getinfo(CURL *curl, CURLINFO info, ...)
         return CURLE_BAD_FUNCTION_ARGUMENT;
 
     rc = __real_curl_easy_getinfo(curl, info, out);
-    if (info == CURLINFO_CONTENT_LENGTH_DOWNLOAD_T && rc == CURLE_OK) {
+    if (info == CURLINFO_CONTENT_LENGTH_DOWNLOAD_T) {
         curl_off_t *length = out;
-        if (*length <= 0) {
+        if (rc != CURLE_OK || *length <= 0) {
             char *effective_url = NULL;
-            if (__real_curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &effective_url) == CURLE_OK && effective_url != NULL) {
+            if (__real_curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &effective_url) == CURLE_OK &&
+                effective_url != NULL && effective_url[0] != '\0') {
                 const curl_off_t probed = probe_total_size(effective_url);
-                if (probed > 0)
+                if (probed > 0) {
                     *length = probed;
+                    return CURLE_OK;
+                }
             }
         }
     }

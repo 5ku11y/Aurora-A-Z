@@ -136,7 +136,7 @@ jobs:
             -t title \
             -i build/spelunkr360/Spelunkr360.dll \
             -o build/spelunkr360/Spelunkr360.xex
-          sha256sum build/spelunkr360/Spelunkr360.xex > build/spelunkr360/Spelunkr360.xex.sha256
+          (cd build/spelunkr360 && sha256sum Spelunkr360.xex > Spelunkr360.xex.sha256)
 
       - name: Validate Spelunkr360 V2
         run: |

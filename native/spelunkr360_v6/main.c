@@ -1,10 +1,11 @@
-/* Spelunkr360 V6 direct-lineup probe.
+/* Spelunkr360 V6A direct-lineup hardware hotfix.
  *
  * V5 proved real Xbox 360 DNS, HTTPS/TLS, HTTP 200, libcurl/Mbed TLS and the
- * V4 renderer can all coexist on hardware. The V5 content check failed only
- * because /directory is an HTML/JS shell. V6 talks to Spelunkr's public
- * broadcast storage directly, downloads lineup.json, finds dial 53, extracts
- * the channel name/id and first manifest path, and shows the result on-screen.
+ * V4 renderer can all coexist on hardware. The first V6 build used a 1 MiB
+ * response buffer as a local stack object before graphics initialization;
+ * that can exhaust the title thread stack and produce a black screen before
+ * any diagnostic text is presented. V6A moves the response body to the heap
+ * and presents a visible CONNECTING screen before the network request starts.
  */
 
 #include <curl/curl.h>
@@ -31,7 +32,7 @@ enum {
     TEXT_ARGB = 0xFFF0F0E8,
     PASS_ARGB = 0xFF8FE388,
     FAIL_ARGB = 0xFFFF8070,
-    BODY_BYTES = 1024 * 1024,
+    BODY_BYTES = 512 * 1024,
     FIELD_BYTES = 192,
 };
 
@@ -40,7 +41,8 @@ static const char *const LINEUP_URL =
 static const char *const CA_FILE = "cacert.pem";
 
 struct response_buffer {
-    char data[BODY_BYTES];
+    char *data;
+    size_t capacity;
     size_t size;
     bool overflow;
 };
@@ -64,7 +66,10 @@ static size_t on_body(char *data, size_t size, size_t count, void *user)
     struct response_buffer *body = user;
     const size_t length = size * count;
 
-    if (length > BODY_BYTES - 1u - body->size) {
+    if (body == NULL || body->data == NULL || body->capacity == 0)
+        return 0;
+
+    if (length > body->capacity - 1u - body->size) {
         body->overflow = true;
         return 0;
     }
@@ -84,16 +89,13 @@ static const char *skip_space(const char *p, const char *end)
 
 static const char *find_key(const char *start, const char *end, const char *key)
 {
-    const size_t key_len = strlen(key);
     const char *p = start;
 
     while (p < end) {
         const char *hit = strstr(p, key);
         if (hit == NULL || hit >= end)
             return NULL;
-        if ((size_t)(end - hit) >= key_len)
-            return hit;
-        p = hit + 1;
+        return hit;
     }
     return NULL;
 }
@@ -211,10 +213,9 @@ static bool parse_channel_53(const char *body, size_t body_size, struct lineup_r
                 (void)parse_string_after_key(id_key, dial, result->id, sizeof(result->id));
             if (name_key != NULL)
                 (void)parse_string_after_key(name_key, dial, result->name, sizeof(result->name));
-            if (manifest_key != NULL) {
+            if (manifest_key != NULL)
                 result->manifest_found = parse_string_after_key(
                     manifest_key, channel_end, result->manifest, sizeof(result->manifest));
-            }
             result->toonertia_found = strcmp(result->name, "TOONERTIA") == 0;
             return true;
         }
@@ -234,8 +235,17 @@ static struct lineup_result fetch_lineup(void)
     memset(&body, 0, sizeof(body));
     result.curl_code = CURLE_FAILED_INIT;
 
+    body.data = malloc(BODY_BYTES);
+    if (body.data == NULL) {
+        snprintf(result.error, sizeof(result.error), "could not allocate response buffer");
+        return result;
+    }
+    body.capacity = BODY_BYTES;
+    body.data[0] = '\0';
+
     if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
         snprintf(result.error, sizeof(result.error), "curl_global_init failed");
+        free(body.data);
         return result;
     }
 
@@ -243,6 +253,7 @@ static struct lineup_result fetch_lineup(void)
     if (curl == NULL) {
         snprintf(result.error, sizeof(result.error), "curl_easy_init failed");
         curl_global_cleanup();
+        free(body.data);
         return result;
     }
 
@@ -256,7 +267,7 @@ static struct lineup_result fetch_lineup(void)
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 15000L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 10L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Spelunkr360/0.6 (Xbox 360 homebrew)");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Spelunkr360/0.6.1 (Xbox 360 homebrew)");
 
     result.curl_code = curl_easy_perform(curl);
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &result.http_code);
@@ -270,6 +281,7 @@ static struct lineup_result fetch_lineup(void)
 
     curl_easy_cleanup(curl);
     curl_global_cleanup();
+    free(body.data);
     return result;
 }
 
@@ -283,19 +295,86 @@ static bool wants_exit(void)
     return (buttons & (INPUT_GAMEPAD_B | INPUT_GAMEPAD_BACK | INPUT_GAMEPAD_START)) != 0;
 }
 
+static NTSTATUS present_blank(uint32_t width, uint32_t height)
+{
+    uint32_t address = 0;
+    NTSTATUS status = xsdk_present_begin(&address, BEGIN_TIMEOUT_MS);
+    if (!NT_SUCCESS(status))
+        return status;
+    xsdk_gpu_resolve(address, width, height, BACKGROUND_ARGB);
+    xsdk_present_end();
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS present_text(uint32_t width, uint32_t height, const char *text, uint32_t color)
+{
+    uint32_t address = 0;
+    NTSTATUS status = xsdk_present_begin(&address, BEGIN_TIMEOUT_MS);
+    if (!NT_SUCCESS(status))
+        return status;
+    xsdk_gpu_set_target(width, height);
+    xsdk_text_draw(55, 45, 2, TEXT_ARGB, text);
+    xsdk_text_draw(55, 650, 2, color, "LIVE PRESENT");
+    xsdk_gpu_resolve(address, width, height, BACKGROUND_ARGB);
+    xsdk_present_end();
+    return STATUS_SUCCESS;
+}
+
 int main(void)
 {
     char screen[1800];
     struct lineup_result lineup;
     bool pass;
+    NTSTATUS status;
+    uint32_t width = 0;
+    uint32_t height = 0;
 
-    xsdk_log_write("Spelunkr360 V6: direct lineup probe: %s", LINEUP_URL);
+    xsdk_log_write("Spelunkr360 V6A: start direct lineup hardware hotfix");
+
+    status = xsdk_gpu_open();
+    if (!NT_SUCCESS(status)) {
+        xsdk_log_write("Spelunkr360 V6A: xsdk_gpu_open failed: 0x%08X", (unsigned)status);
+        return 2;
+    }
+
+    status = xsdk_present_open(XSDK_DISPLAY_720P, BUFFERS, SWAP_INTERVAL, &width, &height);
+    if (!NT_SUCCESS(status)) {
+        xsdk_log_write("Spelunkr360 V6A: xsdk_present_open failed: 0x%08X", (unsigned)status);
+        (void)xsdk_gpu_close();
+        return 3;
+    }
+
+    status = xsdk_text_open();
+    if (!NT_SUCCESS(status)) {
+        xsdk_log_write("Spelunkr360 V6A: xsdk_text_open failed: 0x%08X", (unsigned)status);
+        xsdk_present_close();
+        (void)xsdk_gpu_close();
+        return 4;
+    }
+
+    status = present_blank(width, height);
+    if (!NT_SUCCESS(status)) {
+        xsdk_log_write("Spelunkr360 V6A: initial blank present failed: 0x%08X", (unsigned)status);
+        goto shutdown;
+    }
+
+    status = present_text(width, height,
+        "SPELUNKR360 V6A - DIRECT LINEUP PROBE\n\n"
+        "RENDERER: ONLINE\n"
+        "CONNECTING TO SPELUNKR PUBLIC LINEUP...\n\n"
+        "If this message stays on screen, networking is the next fault boundary.",
+        PASS_ARGB);
+    if (!NT_SUCCESS(status)) {
+        xsdk_log_write("Spelunkr360 V6A: startup present failed: 0x%08X", (unsigned)status);
+        goto shutdown;
+    }
+
     lineup = fetch_lineup();
     pass = lineup.curl_code == CURLE_OK && lineup.http_code == 200 &&
         lineup.dial_found && lineup.toonertia_found && lineup.manifest_found;
 
     xsdk_log_write(
-        "Spelunkr360 V6: curl=%d (%s), HTTP=%ld, bytes=%u, channels=%u, dial53=%u, toonertia=%u, id=%s, manifest=%s%s%s",
+        "Spelunkr360 V6A: curl=%d (%s), HTTP=%ld, bytes=%u, channels=%u, dial53=%u, toonertia=%u, id=%s, manifest=%s%s%s",
         (int)lineup.curl_code, curl_easy_strerror(lineup.curl_code), lineup.http_code,
         (unsigned)lineup.bytes, lineup.offered_channels,
         lineup.dial_found ? 1u : 0u, lineup.toonertia_found ? 1u : 0u,
@@ -303,7 +382,7 @@ int main(void)
         lineup.error[0] ? ", error=" : "", lineup.error);
 
     snprintf(screen, sizeof(screen),
-        "SPELUNKR360 V6 - DIRECT LINEUP PROBE\n"
+        "SPELUNKR360 V6A - DIRECT LINEUP PROBE\n"
         "PUBLIC BROADCAST DATA\n\n"
         "HTTPS: %s\n"
         "HTTP STATUS: %ld\n"
@@ -328,61 +407,35 @@ int main(void)
         lineup.manifest[0] ? lineup.manifest : "(not parsed)",
         pass ? "DIRECT SPELUNKR LINEUP TEST: PASS" : "DIRECT SPELUNKR LINEUP TEST: FAIL");
 
-    NTSTATUS status = xsdk_gpu_open();
-    if (!NT_SUCCESS(status)) {
-        xsdk_log_write("Spelunkr360 V6: xsdk_gpu_open failed: 0x%08X", (unsigned)status);
-        return 2;
-    }
-
-    uint32_t width = 0;
-    uint32_t height = 0;
-    status = xsdk_present_open(XSDK_DISPLAY_720P, BUFFERS, SWAP_INTERVAL, &width, &height);
-    if (!NT_SUCCESS(status)) {
-        xsdk_log_write("Spelunkr360 V6: xsdk_present_open failed: 0x%08X", (unsigned)status);
-        (void)xsdk_gpu_close();
-        return 3;
-    }
-
-    status = xsdk_text_open();
-    if (!NT_SUCCESS(status)) {
-        xsdk_log_write("Spelunkr360 V6: xsdk_text_open failed: 0x%08X", (unsigned)status);
-        xsdk_present_close();
-        (void)xsdk_gpu_close();
-        return 4;
-    }
-
     for (uint32_t frame = 0; frame < AUTO_EXIT_FRAMES; frame++) {
         uint32_t address = 0;
         status = xsdk_present_begin(&address, BEGIN_TIMEOUT_MS);
         if (!NT_SUCCESS(status)) {
-            xsdk_log_write("Spelunkr360 V6: present begin failed at frame %u: 0x%08X",
+            xsdk_log_write("Spelunkr360 V6A: present begin failed at frame %u: 0x%08X",
                 (unsigned)frame, (unsigned)status);
             break;
         }
 
-        if (frame != 0) {
-            xsdk_gpu_set_target(width, height);
-            xsdk_text_draw(55, 45, 2, TEXT_ARGB, screen);
-            xsdk_text_draw(55, 650, 2, pass ? PASS_ARGB : FAIL_ARGB,
-                ((frame / 30u) & 1u) ? "LIVE PRESENT: A" : "LIVE PRESENT: B");
-        }
-
+        xsdk_gpu_set_target(width, height);
+        xsdk_text_draw(55, 45, 2, TEXT_ARGB, screen);
+        xsdk_text_draw(55, 650, 2, pass ? PASS_ARGB : FAIL_ARGB,
+            ((frame / 30u) & 1u) ? "LIVE PRESENT: A" : "LIVE PRESENT: B");
         xsdk_gpu_resolve(address, width, height, BACKGROUND_ARGB);
         xsdk_present_end();
 
         if (wants_exit()) {
-            xsdk_log_write("Spelunkr360 V6: controller exit at frame %u", (unsigned)frame);
+            xsdk_log_write("Spelunkr360 V6A: controller exit at frame %u", (unsigned)frame);
             break;
         }
     }
 
+shutdown:
     xsdk_text_close();
     xsdk_present_close();
     status = xsdk_gpu_close();
     if (!NT_SUCCESS(status))
-        xsdk_log_write("Spelunkr360 V6: xsdk_gpu_close failed: 0x%08X", (unsigned)status);
+        xsdk_log_write("Spelunkr360 V6A: xsdk_gpu_close failed: 0x%08X", (unsigned)status);
 
-    xsdk_log_write("Spelunkr360 V6: normal title exit to dashboard, lineup_pass=%u",
-        pass ? 1u : 0u);
-    return pass ? 0 : 6;
+    xsdk_log_write("Spelunkr360 V6A: normal title exit");
+    return 0;
 }

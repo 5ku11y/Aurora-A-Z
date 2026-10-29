@@ -35,6 +35,7 @@ set_target_properties(sp7_avutil PROPERTIES IMPORTED_LOCATION "${FFMPEG_XSDK_DIR
 
 add_executable(Spelunkr360V7A
   main.c
+  newlib_compat.c
   ../spelunkr360_v6c/schedule_core.c
 )
 set_target_properties(Spelunkr360V7A PROPERTIES C_STANDARD 17 C_EXTENSIONS ON)
@@ -51,6 +52,6 @@ target_link_libraries(Spelunkr360V7A PRIVATE
 )
 target_compile_options(Spelunkr360V7A PRIVATE -Wall -Wextra -Werror -O2)
 xsdk_add_shaders(Spelunkr360V7A frame.vert frame.frag)
-xsdk_add_xex(Spelunkr360V7A TITLE_ID 0x53503601 NAME "Spelunkr360" VERSION 0.7.0.0)
+xsdk_add_xex(Spelunkr360V7A TITLE_ID 0x53503601 NAME "Spelunkr360" VERSION 0.7.0.1)
 
 configure_file("${MBEDTLS_XENON_DIR}/programs/xsdk/cacert.pem" cacert.pem COPYONLY)

@@ -42,6 +42,7 @@ set(V7A_STAGE10_MAIN "${CMAKE_CURRENT_BINARY_DIR}/main_stage10.c")
 set(V7A_CHUNK11_MAIN "${CMAKE_CURRENT_BINARY_DIR}/main_chunk11.c")
 set(V7A_RETRY12_MAIN "${CMAKE_CURRENT_BINARY_DIR}/main_retry12.c")
 set(V7A_OPEN13_MAIN "${CMAKE_CURRENT_BINARY_DIR}/main_open13.c")
+set(V7B_MAIN "${CMAKE_CURRENT_BINARY_DIR}/main_v7b.c")
 
 execute_process(
   COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/patch_range_open.py"
@@ -147,12 +148,24 @@ execute_process(
   ERROR_VARIABLE V7A_OPEN13_PATCH_STDERR
 )
 if(NOT V7A_OPEN13_PATCH_RESULT EQUAL 0)
-  message(FATAL_ERROR "V7A.13 front-moov open source generation failed: ${V7A_OPEN13_PATCH_STDERR}")
+  message(FATAL_ERROR "V7A.14 front-moov/shader source generation failed: ${V7A_OPEN13_PATCH_STDERR}")
 endif()
 message(STATUS "${V7A_OPEN13_PATCH_STDOUT}")
 
+execute_process(
+  COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/patch_v7b.py"
+          "${V7A_OPEN13_MAIN}" "${V7B_MAIN}"
+  RESULT_VARIABLE V7B_PATCH_RESULT
+  OUTPUT_VARIABLE V7B_PATCH_STDOUT
+  ERROR_VARIABLE V7B_PATCH_STDERR
+)
+if(NOT V7B_PATCH_RESULT EQUAL 0)
+  message(FATAL_ERROR "V7B continuous-playback source generation failed: ${V7B_PATCH_STDERR}")
+endif()
+message(STATUS "${V7B_PATCH_STDOUT}")
+
 add_executable(Spelunkr360V7A
-  "${V7A_OPEN13_MAIN}"
+  "${V7B_MAIN}"
   newlib_compat.c
   ../spelunkr360_v6c/schedule_core.c
 )
@@ -171,6 +184,6 @@ target_link_libraries(Spelunkr360V7A PRIVATE
 )
 target_compile_options(Spelunkr360V7A PRIVATE -Wall -Wextra -Werror -O2)
 xsdk_add_shaders(Spelunkr360V7A frame.vert frame.frag)
-xsdk_add_xex(Spelunkr360V7A TITLE_ID 0x53503601 NAME "Spelunkr360" VERSION 0.7.0.13)
+xsdk_add_xex(Spelunkr360V7A TITLE_ID 0x53503601 NAME "Spelunkr360" VERSION 0.7.1.0)
 
 configure_file("${MBEDTLS_XENON_DIR}/programs/xsdk/cacert.pem" ca.pem COPYONLY)

@@ -33,10 +33,11 @@ set_target_properties(sp7_avformat PROPERTIES IMPORTED_LOCATION "${FFMPEG_XSDK_D
 set_target_properties(sp7_avcodec PROPERTIES IMPORTED_LOCATION "${FFMPEG_XSDK_DIR}/lib/libavcodec.a")
 set_target_properties(sp7_avutil PROPERTIES IMPORTED_LOCATION "${FFMPEG_XSDK_DIR}/lib/libavutil.a")
 
-set(V7A_PATCHED_MAIN "${CMAKE_CURRENT_BINARY_DIR}/main_range_open.c")
+set(V7A_RANGE_MAIN "${CMAKE_CURRENT_BINARY_DIR}/main_range_open.c")
+set(V7A_PATCHED_MAIN "${CMAKE_CURRENT_BINARY_DIR}/main_archive_pages.c")
 execute_process(
   COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/patch_range_open.py"
-          "${CMAKE_CURRENT_SOURCE_DIR}/main.c" "${V7A_PATCHED_MAIN}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/main.c" "${V7A_RANGE_MAIN}"
   RESULT_VARIABLE V7A_PATCH_RESULT
   OUTPUT_VARIABLE V7A_PATCH_STDOUT
   ERROR_VARIABLE V7A_PATCH_STDERR
@@ -45,6 +46,18 @@ if(NOT V7A_PATCH_RESULT EQUAL 0)
   message(FATAL_ERROR "V7A range-open source generation failed: ${V7A_PATCH_STDERR}")
 endif()
 message(STATUS "${V7A_PATCH_STDOUT}")
+
+execute_process(
+  COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/patch_metadata_pages.py"
+          "${V7A_RANGE_MAIN}" "${V7A_PATCHED_MAIN}"
+  RESULT_VARIABLE V7A_META_PATCH_RESULT
+  OUTPUT_VARIABLE V7A_META_PATCH_STDOUT
+  ERROR_VARIABLE V7A_META_PATCH_STDERR
+)
+if(NOT V7A_META_PATCH_RESULT EQUAL 0)
+  message(FATAL_ERROR "V7A paged metadata source generation failed: ${V7A_META_PATCH_STDERR}")
+endif()
+message(STATUS "${V7A_META_PATCH_STDOUT}")
 
 add_executable(Spelunkr360V7A
   "${V7A_PATCHED_MAIN}"
@@ -66,6 +79,6 @@ target_link_libraries(Spelunkr360V7A PRIVATE
 )
 target_compile_options(Spelunkr360V7A PRIVATE -Wall -Wextra -Werror -O2)
 xsdk_add_shaders(Spelunkr360V7A frame.vert frame.frag)
-xsdk_add_xex(Spelunkr360V7A TITLE_ID 0x53503601 NAME "Spelunkr360" VERSION 0.7.0.5)
+xsdk_add_xex(Spelunkr360V7A TITLE_ID 0x53503601 NAME "Spelunkr360" VERSION 0.7.0.6)
 
 configure_file("${MBEDTLS_XENON_DIR}/programs/xsdk/cacert.pem" ca.pem COPYONLY)

@@ -62,6 +62,7 @@ typedef struct SpelunkrOverlapped {
 
 static char g_index_path[] = "game:\\index.html";
 static char g_cover_path[] = "game:\\cover.png";
+static const char g_build_marker[] = "Spelunkr360 V2 safe-screen TitleID 53503601";
 
 static const uint16_t g_title[] = {
     'S','p','e','l','u','n','k','r','3','6','0',' ','V','2',0
@@ -99,7 +100,7 @@ static uint8_t file_exists(char *path)
 
 static void notify(const uint16_t *text)
 {
-    XNotifyQueueUI(0u, 0u, 0u, text, 0u);
+    XNotifyQueueUI(3u, 0u, 0u, text, 0u);
 }
 
 static void sleep_50ms(void)
@@ -123,6 +124,7 @@ int main(void)
     const uint8_t assets_ready =
         (uint8_t)(file_exists(g_index_path) != 0u && file_exists(g_cover_path) != 0u);
 
+    DbgPrint("%s\n", g_build_marker);
     overlapped.result = SPELUNKR_OVERLAPPED_PATTERN;
     notify(g_ready_notify);
 

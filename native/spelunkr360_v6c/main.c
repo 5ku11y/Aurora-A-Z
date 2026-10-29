@@ -28,7 +28,14 @@ static const char *const LINEUP_URL =
 static const char *const CA_FILE = "cacert.pem";
 
 struct response_buffer { char *data; size_t capacity; size_t size; bool overflow; };
-struct http_result { CURLcode curl_code; long http_code; size_t bytes; char error[CURL_ERROR_SIZE]; };
+struct http_result {
+    CURLcode curl_code;
+    long http_code;
+    size_t bytes;
+    char error[CURL_ERROR_SIZE];
+    char date_header[96];
+    int64_t server_ms;
+};
 
 static size_t on_body(char *data, size_t size, size_t count, void *user)
 {
@@ -46,12 +53,55 @@ static size_t on_body(char *data, size_t size, size_t count, void *user)
     return length;
 }
 
+static unsigned char ascii_lower(unsigned char c)
+{
+    return (c >= 'A' && c <= 'Z') ? (unsigned char)(c + ('a' - 'A')) : c;
+}
+
+static size_t on_header(char *data, size_t size, size_t count, void *user)
+{
+    struct http_result *result = user;
+    const size_t length = size * count;
+    size_t begin;
+    size_t end;
+    size_t copy;
+
+    if (result == NULL || data == NULL || length < 5u)
+        return length;
+
+    if (ascii_lower((unsigned char)data[0]) != 'd' ||
+        ascii_lower((unsigned char)data[1]) != 'a' ||
+        ascii_lower((unsigned char)data[2]) != 't' ||
+        ascii_lower((unsigned char)data[3]) != 'e' ||
+        data[4] != ':')
+        return length;
+
+    begin = 5u;
+    while (begin < length && (data[begin] == ' ' || data[begin] == '\t'))
+        begin++;
+    end = length;
+    while (end > begin &&
+           (data[end - 1u] == '\r' || data[end - 1u] == '\n' ||
+            data[end - 1u] == ' ' || data[end - 1u] == '\t'))
+        end--;
+
+    copy = end - begin;
+    if (copy >= sizeof(result->date_header))
+        copy = sizeof(result->date_header) - 1u;
+    memcpy(result->date_header, data + begin, copy);
+    result->date_header[copy] = '\0';
+    return length;
+}
+
 static struct http_result fetch_url(const char *url, struct response_buffer *body)
 {
     struct http_result result;
     CURL *curl = NULL;
+    time_t server_time;
+
     memset(&result, 0, sizeof(result));
     result.curl_code = CURLE_FAILED_INIT;
+    result.server_ms = -1;
     body->size = 0;
     body->overflow = false;
     body->data[0] = '\0';
@@ -63,6 +113,8 @@ static struct http_result fetch_url(const char *url, struct response_buffer *bod
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, on_body);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, body);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, on_header);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &result);
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, result.error);
     curl_easy_setopt(curl, CURLOPT_CAINFO, CA_FILE);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
@@ -71,12 +123,19 @@ static struct http_result fetch_url(const char *url, struct response_buffer *bod
     curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 30000L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 10L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Spelunkr360/0.6.3 (Xbox 360 homebrew)");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Spelunkr360/0.6.3.2 (Xbox 360 homebrew)");
     result.curl_code = curl_easy_perform(curl);
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &result.http_code);
     result.bytes = body->size;
     if (body->overflow && result.error[0] == '\0')
         snprintf(result.error, sizeof(result.error), "response exceeded %u bytes", BODY_BYTES);
+
+    if (result.date_header[0] != '\0') {
+        server_time = curl_getdate(result.date_header, NULL);
+        if (server_time != (time_t)-1)
+            result.server_ms = (int64_t)server_time * 1000LL;
+    }
+
     curl_easy_cleanup(curl);
     return result;
 }
@@ -103,12 +162,43 @@ static void adapt_platform_schema_marker(char *json)
         *value = '5';
 }
 
-static int64_t realtime_ms(void)
+static int64_t kernel_realtime_ms(void)
 {
-    struct timespec now;
-    if (clock_gettime(CLOCK_REALTIME, &now) != 0)
+    static const int64_t NT_UNIX_EPOCH_100NS = 116444736000000000LL;
+    uint64_t nt_time = 0;
+    int64_t unix_ticks;
+
+    KeQuerySystemTime(&nt_time);
+    unix_ticks = (int64_t)nt_time - NT_UNIX_EPOCH_100NS;
+    if (unix_ticks < 0)
         return -1;
-    return (int64_t)now.tv_sec * 1000LL + now.tv_nsec / 1000000LL;
+    return unix_ticks / 10000LL;
+}
+
+static int64_t best_server_time_ms(
+    const struct http_result *preferred,
+    const struct http_result *second,
+    const struct http_result *third,
+    const char **source)
+{
+    if (preferred != NULL && preferred->server_ms >= 0) {
+        if (source != NULL) *source = "HTTP DATE";
+        return preferred->server_ms;
+    }
+    if (second != NULL && second->server_ms >= 0) {
+        if (source != NULL) *source = "HTTP DATE";
+        return second->server_ms;
+    }
+    if (third != NULL && third->server_ms >= 0) {
+        if (source != NULL) *source = "HTTP DATE";
+        return third->server_ms;
+    }
+    {
+        const int64_t kernel_ms = kernel_realtime_ms();
+        if (kernel_ms >= 0 && source != NULL)
+            *source = "XBOX KERNEL";
+        return kernel_ms;
+    }
 }
 
 static void format_hms(int64_t ms, char *out, size_t out_size)
@@ -158,8 +248,9 @@ int main(void)
     struct http_result lineup_http = { 0 }, manifest_http = { 0 }, platform_http = { 0 };
     char channel_name[64] = { 0 }, channel_id[64] = { 0 };
     char manifest_url[SP_URL_BYTES] = { 0 }, platform_url[SP_URL_BYTES] = { 0 };
-    char error[256] = { 0 }, screen[3000], offset_text[32], length_text[32];
+    char error[256] = { 0 }, screen[3200], offset_text[32], length_text[32];
     int64_t selected_ms = -1, final_ms = -1;
+    const char *time_source = "NONE";
     bool pass = false, curl_ready = false;
     NTSTATUS status;
     uint32_t width = 0, height = 0;
@@ -178,7 +269,7 @@ int main(void)
     (void)present_blank(width, height);
     (void)present_text(width, height,
         "SPELUNKR360 V6C - WHAT'S ON NOW\n\nRENDERER: ONLINE\n"
-        "FETCHING LIVE TOONERTIA SCHEDULE...\nCALCULATING CURRENT BROADCAST FROM XBOX CLOCK...",
+        "FETCHING LIVE TOONERTIA SCHEDULE...\nSYNCING CURRENT TIME FROM HTTPS SERVER...",
         PASS_ARGB, true);
 
     body.data = malloc(BODY_BYTES);
@@ -188,9 +279,13 @@ int main(void)
     if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) { snprintf(error, sizeof(error), "curl_global_init failed"); goto show_result; }
     curl_ready = true;
 
-    lineup_http = fetch_url(LINEUP_URL, &body); selected_ms = realtime_ms();
+    lineup_http = fetch_url(LINEUP_URL, &body);
+    selected_ms = best_server_time_ms(&lineup_http, NULL, NULL, &time_source);
     if (lineup_http.curl_code != CURLE_OK || lineup_http.http_code != 200 || selected_ms < 0) {
-        snprintf(error, sizeof(error), "lineup/clock failed: curl=%d HTTP=%ld", (int)lineup_http.curl_code, lineup_http.http_code); goto show_result;
+        snprintf(error, sizeof(error), "lineup/time failed: curl=%d HTTP=%ld date=%s",
+            (int)lineup_http.curl_code, lineup_http.http_code,
+            lineup_http.date_header[0] ? lineup_http.date_header : "(none)");
+        goto show_result;
     }
     if (sp_parse_lineup_53(body.data, body.size, selected_ms, &pointer,
             channel_name, sizeof(channel_name), channel_id, sizeof(channel_id), error, sizeof(error)) != 0) goto show_result;
@@ -222,8 +317,12 @@ int main(void)
     }
     adapt_platform_schema_marker(body.data);
     if (sp_parse_platform(body.data, body.size, schedule, error, sizeof(error)) != 0) goto show_result;
-    final_ms = realtime_ms();
-    if (final_ms < 0) { snprintf(error, sizeof(error), "Xbox realtime clock failed"); goto show_result; }
+
+    final_ms = best_server_time_ms(&platform_http, &manifest_http, &lineup_http, &time_source);
+    if (final_ms < 0) {
+        snprintf(error, sizeof(error), "no usable HTTP Date or Xbox kernel time");
+        goto show_result;
+    }
     if (sp_find_now(schedule, &pointer, final_ms, &now_result, error, sizeof(error)) != 0 || !now_result.ok) goto show_result;
     pass = true;
 
@@ -235,12 +334,12 @@ show_result:
             snprintf(screen, sizeof(screen),
                 "SPELUNKR360 V6C - WHAT'S ON NOW\nCH 53 - TOONERTIA\n\n"
                 "LINEUP HTTP: %ld    MANIFEST HTTP: %ld    PLATFORM HTTP: %ld\n"
-                "VERSION: %d    ENGINE: %d    CYCLE: %d    ENTRY: %d\n"
+                "TIME SOURCE: %s\nVERSION: %d    ENGINE: %d    CYCLE: %d    ENTRY: %d\n"
                 "ITEMS: %d    CHANNEL BUMPS: %d    PLATFORM BUMPS: %d\n\n"
                 "CURRENT SEGMENT: SHOW\nNOW PLAYING: %s\nYEAR: %s\nPOSITION: %s / %s\n"
                 "ARCHIVE ID: %s\nMEDIA URL FOUND: %s\n\nWHAT'S ON NOW TEST: PASS\n\n"
                 "Press B, BACK, or START to return to Aurora.\nAuto-return after about 20 seconds.",
-                lineup_http.http_code, manifest_http.http_code, platform_http.http_code,
+                lineup_http.http_code, manifest_http.http_code, platform_http.http_code, time_source,
                 now_result.version, schedule->engine, now_result.cycle, now_result.entry_index,
                 schedule->item_count, schedule->channel_bump_count, schedule->platform_bump_count,
                 now_result.title[0] ? now_result.title : "(untitled)", now_result.year[0] ? now_result.year : "?",
@@ -249,12 +348,12 @@ show_result:
             snprintf(screen, sizeof(screen),
                 "SPELUNKR360 V6C - WHAT'S ON NOW\nCH 53 - TOONERTIA\n\n"
                 "LINEUP HTTP: %ld    MANIFEST HTTP: %ld    PLATFORM HTTP: %ld\n"
-                "VERSION: %d    ENGINE: %d    CYCLE: %d    ENTRY: %d\n"
+                "TIME SOURCE: %s\nVERSION: %d    ENGINE: %d    CYCLE: %d    ENTRY: %d\n"
                 "ITEMS: %d    CHANNEL BUMPS: %d    PLATFORM BUMPS: %d\n\n"
                 "CURRENT SEGMENT: BUMP\nPOSITION: %s / %s\nCHANNEL BUMP: %s\nPLATFORM BUMP: %s\n"
                 "MEDIA URL FOUND: N/A (TEXT/MUSIC BUMP)\n\nWHAT'S ON NOW TEST: PASS\n\n"
                 "Press B, BACK, or START to return to Aurora.\nAuto-return after about 20 seconds.",
-                lineup_http.http_code, manifest_http.http_code, platform_http.http_code,
+                lineup_http.http_code, manifest_http.http_code, platform_http.http_code, time_source,
                 now_result.version, schedule->engine, now_result.cycle, now_result.entry_index,
                 schedule->item_count, schedule->channel_bump_count, schedule->platform_bump_count,
                 offset_text, length_text,
@@ -264,13 +363,21 @@ show_result:
     } else {
         snprintf(screen, sizeof(screen),
             "SPELUNKR360 V6C - WHAT'S ON NOW\nCH 53 - TOONERTIA\n\n"
-            "LINEUP HTTP: %ld\nMANIFEST HTTP: %ld\nPLATFORM HTTP: %ld\n\n"
+            "LINEUP HTTP: %ld\nMANIFEST HTTP: %ld\nPLATFORM HTTP: %ld\n"
+            "LINEUP DATE: %s\nPLATFORM DATE: %s\n\n"
             "WHAT'S ON NOW TEST: FAIL\nERROR: %s\n\nPress B, BACK, or START to return to Aurora.\nAuto-return after about 20 seconds.",
-            lineup_http.http_code, manifest_http.http_code, platform_http.http_code, error[0] ? error : "unknown failure");
+            lineup_http.http_code, manifest_http.http_code, platform_http.http_code,
+            lineup_http.date_header[0] ? lineup_http.date_header : "(none)",
+            platform_http.date_header[0] ? platform_http.date_header : "(none)",
+            error[0] ? error : "unknown failure");
     }
 
-    xsdk_log_write("Spelunkr360 V6C: pass=%u kind=%s cycle=%d entry=%d start=%" PRId64 " len=%" PRId64 " off=%" PRId64 " title=%s archive=%s error=%s",
-        pass ? 1u : 0u, sp_segment_kind_name(now_result.kind), now_result.cycle, now_result.entry_index,
+    xsdk_log_write("Spelunkr360 V6C: pass=%u time=%s lineup_date=%s manifest_date=%s platform_date=%s kind=%s cycle=%d entry=%d start=%" PRId64 " len=%" PRId64 " off=%" PRId64 " title=%s archive=%s error=%s",
+        pass ? 1u : 0u, time_source,
+        lineup_http.date_header[0] ? lineup_http.date_header : "(none)",
+        manifest_http.date_header[0] ? manifest_http.date_header : "(none)",
+        platform_http.date_header[0] ? platform_http.date_header : "(none)",
+        sp_segment_kind_name(now_result.kind), now_result.cycle, now_result.entry_index,
         now_result.segment_start_ms, now_result.segment_length_ms, now_result.offset_ms,
         now_result.title[0] ? now_result.title : "(none)", now_result.archive_url[0] ? now_result.archive_url : "(none)",
         error[0] ? error : "(none)");

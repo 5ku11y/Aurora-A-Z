@@ -183,7 +183,8 @@ jobs:
             grep -E 'FAILED:|fatal error:|error:|undefined reference|ld:' /tmp/v7a-build.log | tail -200 || true
             exit "$rc"
           fi
-          sha256sum build/spelunkr360_v7a/Spelunkr360V7A.xex > build/spelunkr360_v7a/Spelunkr360V7A.xex.sha256
+          cp build/spelunkr360_v7a/Spelunkr360V7A.xex build/spelunkr360_v7a/V7A.xex
+          (cd build/spelunkr360_v7a && sha256sum V7A.xex > V7A.sha)
 
       - name: Validate Spelunkr360 V7A package
         run: |
@@ -194,8 +195,8 @@ jobs:
           TITLE_ID = 0x53503601
           EXECUTION_ID_HEADER = 0x00040006
           RESOURCE_INFO_HEADER = 0x000002FF
-          p = Path('build/spelunkr360_v7a/Spelunkr360V7A.xex')
-          ca = Path('build/spelunkr360_v7a/cacert.pem')
+          p = Path('build/spelunkr360_v7a/V7A.xex')
+          ca = Path('build/spelunkr360_v7a/ca.pem')
           data = p.read_bytes()
           if data[:4] != b'XEX2':
               raise SystemExit('V7A is not XEX2')
@@ -220,21 +221,24 @@ jobs:
           for marker in (
               b'Spelunkr360', b'SPELUNKR360 V7A', b'LIVE VIDEO FRAME PROBE',
               b'DECODED ARCHIVE.ORG FRAME - PASS', b'VIDEO FRAME TEST: FAIL',
-              b'NOW PLAYING', b'TARGET POSITION', b'RANGE HTTP'):
+              b'NOW PLAYING', b'TARGET POSITION', b'RANGE HTTP', b'ca.pem',
+              b'initial range missing Content-Range total'):
               if marker not in data:
                   raise SystemExit(f'missing marker {marker!r}')
+          if b'cacert.pem' in data:
+              raise SystemExit('legacy cacert.pem filename survived in XEX')
           if not ca.is_file() or ca.stat().st_size < 100000:
-              raise SystemExit('cacert.pem missing or unexpectedly small')
+              raise SystemExit('ca.pem missing or unexpectedly small')
           print(f'validated {p} ({p.stat().st_size} bytes), TitleID={title_id:08X}, CA={ca.stat().st_size} bytes')
           PY
 
       - name: Upload Spelunkr360 V7A
         uses: actions/upload-artifact@v4
         with:
-          name: Spelunkr360-V7A-${{ github.sha }}
+          name: V7A-${{ github.sha }}
           if-no-files-found: error
           retention-days: 14
           path: |
-            build/spelunkr360_v7a/Spelunkr360V7A.xex
-            build/spelunkr360_v7a/Spelunkr360V7A.xex.sha256
-            build/spelunkr360_v7a/cacert.pem
+            build/spelunkr360_v7a/V7A.xex
+            build/spelunkr360_v7a/V7A.sha
+            build/spelunkr360_v7a/ca.pem

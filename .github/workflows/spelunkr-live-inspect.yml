@@ -1,0 +1,96 @@
+name: Spelunkr live TOONERTIA inspect
+
+on:
+  push:
+    branches:
+      - spelunkr360-prototype
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Inspect live TOONERTIA data and official now result
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUCKET='https://jbuopkuluyfjwgsrigry.supabase.co/storage/v1/object/public/broadcast/'
+          curl -fsSL "${BUCKET}lineup.json" -o /tmp/lineup.json
+          python3 - <<'PY'
+          import json, time
+          from pathlib import Path
+          lineup=json.loads(Path('/tmp/lineup.json').read_text())
+          ch=next(c for c in lineup['channels'] if c.get('dial')==53)
+          now=int(time.time()*1000)
+          versions=ch.get('versions',[])
+          current=None
+          for p in versions:
+              eff=p.get('effectiveAtMs',p.get('epochMs',0))
+              if eff<=now and (current is None or eff>current.get('effectiveAtMs',current.get('epochMs',0))):
+                  current=p
+          if current is None:
+              current=min(versions,key=lambda p:(p.get('effectiveAtMs',p.get('epochMs',0)), -p.get('v',0)))
+          print('NOW_MS',now)
+          print('CHANNEL_KEYS',sorted(ch.keys()))
+          print('CHANNEL_NAME',ch.get('name'),'ID',ch.get('id'),'DIAL',ch.get('dial'))
+          print('VERSION_POINTERS',json.dumps(versions,separators=(',',':')))
+          print('SELECTED_POINTER',json.dumps(current,separators=(',',':')))
+          Path('/tmp/manifest_path').write_text(current['manifest'])
+          Path('/tmp/pointer.json').write_text(json.dumps(current,separators=(',',':')))
+          PY
+          MANIFEST_PATH="$(cat /tmp/manifest_path)"
+          curl -fsSL "${BUCKET}${MANIFEST_PATH}" -o /tmp/manifest.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          m=json.loads(Path('/tmp/manifest.json').read_text())
+          print('MANIFEST_KEYS',sorted(m.keys()))
+          print('ENGINE',m.get('engine'),'CHANNEL',m.get('channel'),'VERSION',m.get('version'))
+          print('ITEMS',len(m.get('items',[])),'BUMPS',len(m.get('bumps',[])),'AUDIO',len(m.get('audio',[])))
+          print('HAS_BLOCK',bool(m.get('block')),'BLOCK',json.dumps(m.get('block'),separators=(',',':')) if m.get('block') else None)
+          ads=m.get('ads')
+          print('HAS_ADS',bool(ads),'ADS_KEYS',sorted(ads.keys()) if isinstance(ads,dict) else None,'AD_SLICES',len(ads.get('slices',[])) if isinstance(ads,dict) else 0)
+          print('PLATFORM',m.get('platform'))
+          print('FIRST_ITEM',json.dumps(m.get('items',[None])[0],separators=(',',':')))
+          if m.get('platform'):
+              Path('/tmp/platform_path').write_text(m['platform'])
+          PY
+          if test -s /tmp/platform_path; then
+            PLATFORM_PATH="$(cat /tmp/platform_path)"
+            curl -fsSL "${BUCKET}${PLATFORM_PATH}" -o /tmp/platform.json
+            python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=json.loads(Path('/tmp/platform.json').read_text())
+          print('PLATFORM_KEYS',sorted(p.keys()))
+          print('PLATFORM_BUMPS',len(p.get('bumps',[])),'PLATFORM_AUDIO',len(p.get('audio',[])))
+          PY
+          else
+            echo '{}' >/tmp/platform.json
+          fi
+
+          git clone --depth 1 https://github.com/kr8vka0z/jellyfin-plugin-spelunkr.git /tmp/ref >/dev/null 2>&1
+          cp /tmp/lineup.json /tmp/ref-lineup.json
+          cat >/tmp/ref/now-v6c.mjs <<'JS'
+          import fs from 'node:fs';
+          import { createChannel, addChannelVersion, segmentAt } from './Jellyfin.Plugin.Spelunkr/Schedule/schedule.js';
+          const lineup=JSON.parse(fs.readFileSync('/tmp/lineup.json','utf8'));
+          const entry=lineup.channels.find(c=>c.dial===53);
+          const now=Date.now();
+          const channel=createChannel(entry.id);
+          const bucket='https://jbuopkuluyfjwgsrigry.supabase.co/storage/v1/object/public/broadcast/';
+          async function text(path){ const r=await fetch(bucket+path); if(!r.ok) throw new Error(`${path} ${r.status}`); return await r.text(); }
+          for (const pointer of entry.versions) {
+            const manifestText=await text(pointer.manifest);
+            const manifest=JSON.parse(manifestText);
+            const platformText=manifest.platform ? await text(manifest.platform) : null;
+            addChannelVersion(channel,manifestText,platformText,JSON.stringify(pointer));
+          }
+          console.log('OFFICIAL_NOW_MS',now);
+          console.log('OFFICIAL_NOW',segmentAt(channel,now,lineup.audioBase||''));
+          JS
+          node /tmp/ref/now-v6c.mjs

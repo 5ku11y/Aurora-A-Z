@@ -51,7 +51,7 @@ jobs:
           JOBS: 4
         run: |
           cd "${XSDK_ROOT}"
-          tools/toolchain/build.sh
+          bash tools/toolchain/build.sh
 
       - name: Save xsdk GCC toolchain after cache miss
         if: steps.xsdk-cache.outputs.cache-hit != 'true'

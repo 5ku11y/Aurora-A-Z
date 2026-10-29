@@ -1,0 +1,46 @@
+name: Archive metadata page diagnostic
+
+on:
+  push:
+    branches:
+      - spelunkr360-prototype
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Inspect exact Toonami Archive file metadata pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          ID='ocwoc-081-toonami-full-cycle-marathon-cn-2000_202505'
+          WANT='OCWOC 081 - Toonami Full Cycle Marathon (CN, 2000).ia.mp4'
+          curl -fsSL "https://archive.org/metadata/${ID}/files_count" -o /tmp/count.json
+          echo "FILES_COUNT_RESPONSE=$(cat /tmp/count.json)"
+          python3 - <<'PY'
+          import json, urllib.request
+          ident='ocwoc-081-toonami-full-cycle-marathon-cn-2000_202505'
+          wanted='OCWOC 081 - Toonami Full Cycle Marathon (CN, 2000).ia.mp4'
+          for start in range(0,4096,24):
+              url=f'https://archive.org/metadata/{ident}/files?start={start}&count=24'
+              with urllib.request.urlopen(url, timeout=30) as r:
+                  raw=r.read()
+                  print('PAGE',start,'HTTP',r.status,'BYTES',len(raw))
+              obj=json.loads(raw)
+              print('TOP_KEYS',sorted(obj.keys()) if isinstance(obj,dict) else type(obj).__name__)
+              rows=obj.get('result',[]) if isinstance(obj,dict) else []
+              print('RESULT_COUNT',len(rows))
+              for i,row in enumerate(rows):
+                  if isinstance(row,dict) and row.get('name')==wanted:
+                      print('FOUND_INDEX',start+i)
+                      print('FOUND_ROW',json.dumps(row,separators=(',',':')))
+                      raise SystemExit(0)
+              if len(rows)<24:
+                  break
+          raise SystemExit('wanted file not found')
+          PY

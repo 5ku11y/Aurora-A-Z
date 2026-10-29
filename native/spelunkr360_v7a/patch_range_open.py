@@ -87,6 +87,160 @@ new = r'''static size_t remote_size_header(char *data, size_t size, size_t count
     return length;
 }
 
+static int hex_nibble(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static bool percent_decode_path(const char *src, size_t src_len, char *dst, size_t dst_size)
+{
+    size_t i = 0, o = 0;
+    if (src == NULL || dst == NULL || dst_size == 0) return false;
+    while (i < src_len) {
+        unsigned char ch = (unsigned char)src[i++];
+        if (ch == '%' && i + 1u < src_len) {
+            const int hi = hex_nibble(src[i]);
+            const int lo = hex_nibble(src[i + 1u]);
+            if (hi >= 0 && lo >= 0) {
+                ch = (unsigned char)((hi << 4) | lo);
+                i += 2u;
+            }
+        }
+        if (o + 1u >= dst_size) return false;
+        dst[o++] = (char)ch;
+    }
+    dst[o] = '\0';
+    return true;
+}
+
+static const char *json_read_name(const char *quote, char *out, size_t out_size)
+{
+    const char *p = quote;
+    size_t o = 0;
+    if (p == NULL || out == NULL || out_size == 0 || *p != '"') return NULL;
+    p++;
+    while (*p != '\0') {
+        unsigned char ch = (unsigned char)*p++;
+        if (ch == '"') {
+            out[o] = '\0';
+            return p;
+        }
+        if (ch == '\\') {
+            ch = (unsigned char)*p++;
+            if (ch == '\0') return NULL;
+            switch (ch) {
+                case '"': case '\\': case '/': break;
+                case 'b': ch = '\b'; break;
+                case 'f': ch = '\f'; break;
+                case 'n': ch = '\n'; break;
+                case 'r': ch = '\r'; break;
+                case 't': ch = '\t'; break;
+                case 'u': {
+                    int value = 0;
+                    int j;
+                    for (j = 0; j < 4; j++) {
+                        const int nibble = hex_nibble(*p++);
+                        if (nibble < 0) return NULL;
+                        value = (value << 4) | nibble;
+                    }
+                    ch = (unsigned char)(value <= 0x7f ? value : '?');
+                    break;
+                }
+                default: return NULL;
+            }
+        }
+        if (o + 1u >= out_size) return NULL;
+        out[o++] = (char)ch;
+    }
+    return NULL;
+}
+
+static int64_t metadata_file_size(const char *json, const char *wanted_name)
+{
+    const char *p = json;
+    if (json == NULL || wanted_name == NULL) return -1;
+
+    while ((p = strstr(p, "\"name\"")) != NULL) {
+        const char *q = p + 6;
+        const char *after_name;
+        const char *obj_end;
+        const char *size_key;
+        const char *colon;
+        char parsed_name[SP_FILE_BYTES];
+        unsigned long long value;
+
+        while (*q == ' ' || *q == '\t' || *q == '\r' || *q == '\n') q++;
+        if (*q++ != ':') { p += 6; continue; }
+        while (*q == ' ' || *q == '\t' || *q == '\r' || *q == '\n') q++;
+        if (*q != '"') { p += 6; continue; }
+        after_name = json_read_name(q, parsed_name, sizeof(parsed_name));
+        if (after_name == NULL) { p += 6; continue; }
+        if (strcmp(parsed_name, wanted_name) != 0) { p = after_name; continue; }
+
+        obj_end = strchr(after_name, '}');
+        if (obj_end == NULL) return -1;
+        size_key = strstr(after_name, "\"size\"");
+        if (size_key == NULL || size_key >= obj_end) return -1;
+        colon = strchr(size_key + 6, ':');
+        if (colon == NULL || colon >= obj_end) return -1;
+        colon++;
+        while (colon < obj_end && (*colon == ' ' || *colon == '\t' || *colon == '\r' || *colon == '\n')) colon++;
+        if (colon < obj_end && *colon == '"') colon++;
+        if (colon >= obj_end || *colon < '0' || *colon > '9') return -1;
+        value = strtoull(colon, NULL, 10);
+        return (value > 0 && value <= INT64_MAX) ? (int64_t)value : -1;
+    }
+    return -1;
+}
+
+static int64_t archive_metadata_size(const char *media_url)
+{
+    static const char prefix[] = "https://archive.org/download/";
+    const char *id_start;
+    const char *slash;
+    const char *file_start;
+    const char *file_end;
+    size_t id_len;
+    size_t file_len;
+    char metadata_url[SP_URL_BYTES];
+    char filename[SP_FILE_BYTES];
+    char *json;
+    struct response_buffer body;
+    struct http_result result;
+    int64_t total = -1;
+
+    if (media_url == NULL || strncmp(media_url, prefix, sizeof(prefix) - 1u) != 0)
+        return -1;
+    id_start = media_url + sizeof(prefix) - 1u;
+    slash = strchr(id_start, '/');
+    if (slash == NULL || slash == id_start) return -1;
+    id_len = (size_t)(slash - id_start);
+    file_start = slash + 1;
+    file_end = strpbrk(file_start, "?#");
+    if (file_end == NULL) file_end = file_start + strlen(file_start);
+    file_len = (size_t)(file_end - file_start);
+    if (!percent_decode_path(file_start, file_len, filename, sizeof(filename))) return -1;
+
+    if (snprintf(metadata_url, sizeof(metadata_url), "https://archive.org/metadata/%.*s",
+            (int)id_len, id_start) >= (int)sizeof(metadata_url))
+        return -1;
+
+    json = malloc(BODY_BYTES);
+    if (json == NULL) return -1;
+    body.data = json;
+    body.capacity = BODY_BYTES;
+    body.size = 0;
+    body.overflow = false;
+    result = fetch_url(metadata_url, &body);
+    if (result.curl_code == CURLE_OK && result.http_code == 200 && !body.overflow)
+        total = metadata_file_size(json, filename);
+    free(json);
+    return total;
+}
+
 static int remote_open(struct remote_file *remote, const char *url)
 {
     CURLcode result;
@@ -134,12 +288,14 @@ static int remote_open(struct remote_file *remote, const char *url)
         snprintf(remote->error, sizeof(remote->error), "initial range expected 206, got HTTP %ld", http);
         return -1;
     }
-    if (total <= 0) {
-        snprintf(remote->error, sizeof(remote->error), "initial range missing Content-Range total");
-        return -1;
-    }
     if (remote->cache_length == 0) {
         snprintf(remote->error, sizeof(remote->error), "initial range returned no media bytes");
+        return -1;
+    }
+    if (total <= 0)
+        total = archive_metadata_size(remote->url);
+    if (total <= 0) {
+        snprintf(remote->error, sizeof(remote->error), "range total missing; metadata size fallback failed");
         return -1;
     }
 
@@ -159,9 +315,9 @@ patched = patched.replace('static const char *const CA_FILE = "cacert.pem";',
                           'static const char *const CA_FILE = "ca.pem";', 1)
 if 'media HEAD curl=' in patched or 'media size unavailable' in patched:
     raise SystemExit("legacy HEAD media-open path survived patch")
-if 'initial range missing Content-Range total' not in patched:
-    raise SystemExit("new range-open diagnostics missing")
+if 'metadata size fallback failed' not in patched or 'https://archive.org/metadata/' not in patched:
+    raise SystemExit("Archive metadata size fallback missing")
 if 'static const char *const CA_FILE = "ca.pem";' not in patched:
     raise SystemExit("short CA filename patch failed")
 out.write_text(patched)
-print(f"generated {out} with direct range media-open and ca.pem")
+print(f"generated {out} with direct range media-open, Archive metadata size fallback, and ca.pem")

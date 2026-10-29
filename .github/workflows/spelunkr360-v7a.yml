@@ -219,10 +219,10 @@ jobs:
           if resource_name != b'53503601' or resource_size == 0:
               raise SystemExit('V7A dashboard title resource is invalid')
           for marker in (
-              b'Spelunkr360', b'SPELUNKR360 V7A.8', b'LIVE VIDEO FRAME PROBE',
+              b'Spelunkr360', b'SPELUNKR360 V7A.9', b'LIVE VIDEO FRAME PROBE',
               b'DECODED ARCHIVE.ORG FRAME - PASS', b'VIDEO FRAME TEST: FAIL',
               b'NOW PLAYING', b'TARGET POSITION', b'RANGE HTTP', b'ca.pem',
-              b'SZ8 CR=', b'META H='):
+              b'remote_prefetch_front_moov', b'MP4 OPEN:', b'SZ8 CR=', b'META H='):
               if marker not in data:
                   raise SystemExit(f'missing marker {marker!r}')
           if b'cacert.pem' in data:

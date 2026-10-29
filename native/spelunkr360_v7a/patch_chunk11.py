@@ -57,6 +57,8 @@ new_prefetch = r'''    remote->cache = grown;
     remote->cache_capacity = (size_t)target;
     remote->cache_length = 0;
     remote->curl_error[0] = '\0';
+    xsdk_log_write("SPELUNKR360 V7A.10");
+    xsdk_log_write("STAGE 1/5: DOWNLOADING 17 MB MP4 HEADER");
     {
         const size_t chunk_bytes = 1024u * 1024u;
         const size_t target_bytes = (size_t)target;

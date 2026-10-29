@@ -30,7 +30,7 @@ jobs:
       FFMPEG_PREFIX: /home/runner/work/_temp/ffmpeg-xsdk
       XSDK_TOOLCHAIN: /home/runner/work/_temp/xsdk-gcc
       XSDK_TOOLCHAIN_CACHE: xsdk-gcc15-v1-8c58c7a3fb37bb261c5a11a8a1f4fa8a8bfd0d28
-      FFMPEG_CACHE: ffmpeg-v7a-xsdk-v1-b08d7969c550a804a59511c7b83f2dd8cc0499b8
+      FFMPEG_CACHE: ffmpeg-v7a-xsdk-v2-b08d7969c550a804a59511c7b83f2dd8cc0499b8
 
     steps:
       - name: Check out Spelunkr branch
@@ -125,7 +125,28 @@ jobs:
             --disable-runtime-cpudetect --disable-asm --disable-altivec --disable-vsx --disable-power8 \
             --disable-iconv --disable-zlib --disable-bzlib --disable-lzma \
             --disable-debug --enable-static --disable-shared \
-            --extra-cflags='-O2 -fno-strict-aliasing'
+            --extra-cflags='-O2 -fno-strict-aliasing' \
+            --extra-libs='-lm'
+
+          # FFmpeg's target-os=none probes cannot execute target binaries and
+          # mis-detect a few functions already supplied by xsdk's newlib.
+          # Correct only those generated feature results before compilation.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('config.h')
+          s = p.read_text()
+          s = s.replace('#define getenv(x) NULL\n', '')
+          for name in ('ERF', 'HYPOT'):
+              s = s.replace(f'#define HAVE_{name} 0', f'#define HAVE_{name} 1')
+          p.write_text(s)
+          if '#define getenv(x) NULL' in s:
+              raise SystemExit('failed to remove FFmpeg getenv fallback')
+          for name in ('ERF', 'HYPOT'):
+              if f'#define HAVE_{name} 1' not in s:
+                  raise SystemExit(f'failed to enable HAVE_{name}')
+          print('FFmpeg newlib compatibility flags patched')
+          PY
+
           make -j4
           make install
           test -f "${FFMPEG_PREFIX}/lib/libavformat.a"

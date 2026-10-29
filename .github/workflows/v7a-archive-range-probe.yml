@@ -1,0 +1,39 @@
+name: V7A Archive range behavior probe
+
+on:
+  push:
+    branches: [spelunkr360-prototype]
+    paths:
+      - '.github/workflows/v7a-archive-range-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Probe Archive media headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://archive.org/download/2000-fall-toonami-tape-c.-converted/2000%20Fall%20-%20Toonami%20Tape%20C.Converted.ia.mp4'
+          echo '=== HEAD ==='
+          curl -sSIL --max-time 30 "$URL" | sed -n '1,120p'
+          echo '=== RANGE 0-0 ==='
+          curl -sSL --max-time 30 -r 0-0 -D - -o /dev/null "$URL" | sed -n '1,160p'
+          echo '=== RANGE 0-262143 ==='
+          curl -sSL --max-time 30 -r 0-262143 -D - -o /dev/null "$URL" | sed -n '1,160p'
+          echo '=== RANGE suffix -1 ==='
+          curl -sSL --max-time 30 -r -1 -D - -o /dev/null "$URL" | sed -n '1,160p'
+          echo '=== METADATA FILE SIZE ==='
+          curl -fsSL --max-time 30 'https://archive.org/metadata/2000-fall-toonami-tape-c.-converted' -o /tmp/meta.json
+          python3 - <<'PY'
+          import json
+          with open('/tmp/meta.json','r',encoding='utf-8') as f:
+              m=json.load(f)
+          name='2000 Fall - Toonami Tape C.Converted.ia.mp4'
+          x=next((f for f in m.get('files',[]) if f.get('name')==name), None)
+          print(x)
+          PY

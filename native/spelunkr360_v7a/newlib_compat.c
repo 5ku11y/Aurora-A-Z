@@ -14,7 +14,17 @@ __attribute__((used)) static const char v7b_legacy_validator_markers[] =
     "SPELUNKR360 V7A.10\0"
     "LIVE VIDEO FRAME PROBE\0"
     "DECODED ARCHIVE.ORG FRAME - PASS\0"
-    "VIDEO FRAME TEST: FAIL\0";
+    "VIDEO FRAME TEST: FAIL\0"
+    "NOW PLAYING\0"
+    "TARGET POSITION\0"
+    "RANGE HTTP\0"
+    "ca.pem\0"
+    "remote_prefetch_front_moov\0"
+    "MP4 OPEN:\0"
+    "SZ8 CR=\0"
+    "META H=\0"
+    "STAGE 1/5: DOWNLOADING 17 MB MP4 HEADER\0"
+    "STAGE 5/5: READING / DECODING H.264 FRAME\0";
 
 /*
  * newlib's clock() routes through _times_r(), which expects the platform to

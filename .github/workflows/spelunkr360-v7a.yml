@@ -41,7 +41,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
             build-essential bison flex texinfo libgmp-dev libmpfr-dev libmpc-dev \
-            curl xz-utils patch python3 cmake ninja-build git pkg-config
+            curl xz-utils patch python3 cmake ninja-build git pkg-config glslang-tools
+          command -v glslangValidator
+          glslangValidator --version
 
       - name: Fetch pinned xsdk and network libraries
         run: |
@@ -160,9 +162,11 @@ jobs:
       - name: Build Spelunkr360 V7A live video frame probe
         run: |
           set -euo pipefail
+          GLSLANG="$(command -v glslangValidator)"
           cmake -S native/spelunkr360_v7a -B build/spelunkr360_v7a -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="${XSDK_ROOT}/cmake/xsdk.cmake" \
             -DXSDK_TOOLCHAIN="${XSDK_TOOLCHAIN}" \
+            -DXSDK_GLSLANG="${GLSLANG}" \
             -DMBEDTLS_XENON_DIR="${MBEDTLS_XENON_ROOT}" \
             -DCURL_XENON_DIR="${CURL_XENON_ROOT}" \
             -DFFMPEG_XSDK_DIR="${FFMPEG_PREFIX}" \
@@ -173,6 +177,8 @@ jobs:
           rc=$?
           set -e
           if [ "$rc" -ne 0 ]; then
+            echo '--- V7A BUILD TAIL ---'
+            tail -120 /tmp/v7a-build.log || true
             echo '--- V7A COMPILE/LINK ERRORS ---'
             grep -E 'FAILED:|fatal error:|error:|undefined reference|ld:' /tmp/v7a-build.log | tail -200 || true
             exit "$rc"

@@ -21,13 +21,10 @@ set(MBEDCRYPTO_LIBRARY mbedcrypto CACHE STRING "")
 set(CURL_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
 add_subdirectory("${CURL_XENON_DIR}" curl)
 
-add_executable(Spelunkr360V6C main.c schedule_core.c clock_kernel.c)
-# Only V6C's main clock read is redirected. curl/mbedTLS and the rest of xsdk
-# keep their normal time implementation; the shim itself calls KeQuerySystemTime.
-set_source_files_properties(main.c PROPERTIES COMPILE_DEFINITIONS "clock_gettime=v6c_clock_gettime")
+add_executable(Spelunkr360V6C main.c schedule_core.c)
 set_target_properties(Spelunkr360V6C PROPERTIES C_STANDARD 17 C_EXTENSIONS ON)
 target_link_libraries(Spelunkr360V6C PRIVATE CURL::libcurl mbedtls)
 target_compile_options(Spelunkr360V6C PRIVATE -Wall -Wextra -Werror)
-xsdk_add_xex(Spelunkr360V6C TITLE_ID 0x53503601 NAME "Spelunkr360" VERSION 0.6.3.1)
+xsdk_add_xex(Spelunkr360V6C TITLE_ID 0x53503601 NAME "Spelunkr360" VERSION 0.6.3.2)
 
 configure_file("${MBEDTLS_XENON_DIR}/programs/xsdk/cacert.pem" cacert.pem COPYONLY)

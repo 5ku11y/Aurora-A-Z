@@ -21,7 +21,7 @@ new_seekable = r'''    format->pb = avio;
      * re-enable random access immediately after mov_read_header succeeds.
      */
     avio->seekable = 0;
-    xsdk_log_write("V7A.13 OPEN MODE: FRONT-MOOV STREAM (NO AVSEEK_SIZE)");
+    xsdk_log_write("V7A.14 OPEN MODE: FRONT-MOOV STREAM (NO AVSEEK_SIZE)");
     format->probesize = 24 * 1024 * 1024;'''
 if old_seekable not in src:
     raise SystemExit('V7A.12 seekable-open marker missing')
@@ -39,7 +39,7 @@ new_after_open = r'''        goto fail;
     avio->seekable = AVIO_SEEKABLE_NORMAL;
     avio->eof_reached = 0;
     avio->error = 0;
-    xsdk_log_write("V7A.13 MP4 OPEN PASS; RANDOM ACCESS RE-ENABLED");
+    xsdk_log_write("V7A.14 MP4 OPEN PASS; RANDOM ACCESS RE-ENABLED");
     v7_stage("STAGE 2/5: MP4 CONTAINER OPEN - PASS\nRANDOM ACCESS RE-ENABLED FOR LIVE SEEK.");
 
     v7_stage("STAGE 3/5: READING VIDEO STREAM INFO...");
@@ -48,20 +48,20 @@ if old_after_open not in src:
     raise SystemExit('V7A.12 post-open marker missing')
 src = src.replace(old_after_open, new_after_open, 1)
 
-src = src.replace('SPELUNKR360 V7A.12 - LIVE VIDEO FRAME PROBE', 'SPELUNKR360 V7A.13 - LIVE VIDEO FRAME PROBE')
-src = src.replace('V7A.12 - B/BACK/START RETURNS TO AURORA', 'V7A.13 - B/BACK/START RETURNS TO AURORA')
+src = src.replace('SPELUNKR360 V7A.12 - LIVE VIDEO FRAME PROBE', 'SPELUNKR360 V7A.14 - LIVE VIDEO FRAME PROBE')
+src = src.replace('V7A.12 - B/BACK/START RETURNS TO AURORA', 'V7A.14 - B/BACK/START RETURNS TO AURORA')
 
 for needle in (
-    'SPELUNKR360 V7A.13 - LIVE VIDEO FRAME PROBE',
-    'V7A.13 OPEN MODE: FRONT-MOOV STREAM (NO AVSEEK_SIZE)',
+    'SPELUNKR360 V7A.14 - LIVE VIDEO FRAME PROBE',
+    'V7A.14 OPEN MODE: FRONT-MOOV STREAM (NO AVSEEK_SIZE)',
     'avio->seekable = 0',
-    'V7A.13 MP4 OPEN PASS; RANDOM ACCESS RE-ENABLED',
+    'V7A.14 MP4 OPEN PASS; RANDOM ACCESS RE-ENABLED',
     'STAGE 2/5: MP4 CONTAINER OPEN - PASS',
     'avio->seekable = AVIO_SEEKABLE_NORMAL',
     'STAGE 3/5: READING VIDEO STREAM INFO',
 ):
     if needle not in src:
-        raise SystemExit(f'V7A.13 marker missing: {needle}')
+        raise SystemExit(f'V7A.14 marker missing: {needle}')
 
 out.write_text(src)
-print(f"generated {out} with V7A.13 front-moov nonseekable-open workaround")
+print(f"generated {out} with V7A.14 front-moov open path and shader-semantic fix build marker")

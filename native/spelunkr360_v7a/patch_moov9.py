@@ -140,7 +140,7 @@ static int remote_prefetch_front_moov(struct remote_file *remote)
 
     grown = realloc(remote->cache, (size_t)target);
     if (grown == NULL) {
-        snprintf(remote->error, sizeof(remote->error), "moov cache realloc %u failed", (unsigned)target);
+        snprintf(remote->error, sizeof(remote->error), "remote_prefetch_front_moov realloc %u failed", (unsigned)target);
         return -1;
     }
     remote->cache = grown;

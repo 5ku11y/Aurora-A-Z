@@ -14,12 +14,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Inspect exact Toonami Archive file metadata pages
+      - name: Inspect exact Toonami Archive file metadata pages and media headers
         shell: bash
         run: |
           set -euo pipefail
           ID='ocwoc-081-toonami-full-cycle-marathon-cn-2000_202505'
           WANT='OCWOC 081 - Toonami Full Cycle Marathon (CN, 2000).ia.mp4'
+          URL='https://archive.org/download/ocwoc-081-toonami-full-cycle-marathon-cn-2000_202505/OCWOC%20081%20-%20Toonami%20Full%20Cycle%20Marathon%20(CN%2C%202000).ia.mp4'
           curl -fsSL "https://archive.org/metadata/${ID}/files_count" -o /tmp/count.json
           echo "FILES_COUNT_RESPONSE=$(cat /tmp/count.json)"
           python3 - <<'PY'
@@ -39,8 +40,21 @@ jobs:
                   if isinstance(row,dict) and row.get('name')==wanted:
                       print('FOUND_INDEX',start+i)
                       print('FOUND_ROW',json.dumps(row,separators=(',',':')))
-                      raise SystemExit(0)
-              if len(rows)<24:
-                  break
-          raise SystemExit('wanted file not found')
+                      break
+              else:
+                  if len(rows)<24:
+                      raise SystemExit('wanted file not found')
+                  continue
+              break
           PY
+
+          echo '--- HEAD archive.org/download ---'
+          curl -sSIL "$URL" | sed -n '1,120p'
+          echo '--- RANGE archive.org/download ---'
+          curl -sSL -D - -o /dev/null -r 0-255 "$URL" | sed -n '1,160p'
+          FINAL="$(curl -sSL -o /dev/null -w '%{url_effective}' -r 0-0 "$URL")"
+          echo "FINAL_URL=$FINAL"
+          echo '--- HEAD final storage URL ---'
+          curl -sSI "$FINAL" | sed -n '1,120p'
+          echo '--- RANGE final storage URL ---'
+          curl -sS -D - -o /dev/null -r 0-255 "$FINAL" | sed -n '1,160p'

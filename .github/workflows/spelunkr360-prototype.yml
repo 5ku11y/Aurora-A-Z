@@ -111,6 +111,8 @@ jobs:
           patch_file="${GITHUB_WORKSPACE}/scripts/openxechain-synthxex-image-base.patch"
           git -C "${SYNTHXEX_SOURCE_DIR}" apply --check "${patch_file}"
           git -C "${SYNTHXEX_SOURCE_DIR}" apply "${patch_file}"
+          python3 "${GITHUB_WORKSPACE}/scripts/patch-spelunkr-synthxex-titleid.py" "${SYNTHXEX_SOURCE_DIR}"
+          git -C "${SYNTHXEX_SOURCE_DIR}" diff --check
           cmake -S "${SYNTHXEX_SOURCE_DIR}" -B "${SYNTHXEX_BUILD_DIR}" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="${OPENXECHAIN_ROOT}"
           cmake --build "${SYNTHXEX_BUILD_DIR}" --parallel 2
@@ -136,30 +138,54 @@ jobs:
             -o build/spelunkr360/Spelunkr360.xex
           sha256sum build/spelunkr360/Spelunkr360.xex > build/spelunkr360/Spelunkr360.xex.sha256
 
-      - name: Validate Spelunkr360 prototype
+      - name: Validate Spelunkr360 V2
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import struct
+
+          TITLE_ID = 0x53503601
+          EXECUTION_ID_HEADER = 0x00040006
+
           p = Path('build/spelunkr360/Spelunkr360.xex')
           data = p.read_bytes()
           if data[:4] != b'XEX2':
               raise SystemExit('Spelunkr360 is not XEX2')
+
           for needle in (
-              b'Spelunkr360 - CH 53 TOONERTIA ready',
+              b'Spelunkr360 V2 safe-screen TitleID 53503601',
               b'game:\\index.html',
               b'game:\\cover.png',
-              b'Spelunkr360 - returning to Aurora',
           ):
               if needle not in data:
-                  raise SystemExit(f'missing Spelunkr360 marker: {needle!r}')
-          print(f'validated Spelunkr360 XEX2: {p} ({p.stat().st_size} bytes)')
+                  raise SystemExit(f'missing Spelunkr360 V2 marker: {needle!r}')
+
+          count = struct.unpack_from('>I', data, 0x14)[0]
+          execution_offset = None
+          for index in range(count):
+              header_id, value = struct.unpack_from('>II', data, 0x18 + index * 8)
+              if header_id == EXECUTION_ID_HEADER:
+                  execution_offset = value
+                  break
+          if execution_offset is None:
+              raise SystemExit('Spelunkr360 V2 has no 0x40006 Execution ID')
+          if execution_offset + 24 > len(data):
+              raise SystemExit('Spelunkr360 V2 Execution ID is out of range')
+          title_id = struct.unpack_from('>I', data, execution_offset + 12)[0]
+          if title_id != TITLE_ID:
+              raise SystemExit(f'wrong Spelunkr360 TitleID: {title_id:08X}')
+
+          print(
+              f'validated Spelunkr360 V2 XEX2: {p} '
+              f'({p.stat().st_size} bytes), TitleID={title_id:08X}'
+          )
           PY
           (cd build/spelunkr360 && sha256sum --check Spelunkr360.xex.sha256)
 
-      - name: Upload Spelunkr360 prototype
+      - name: Upload Spelunkr360 V2
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: Spelunkr360-${{ github.sha }}
+          name: Spelunkr360-V2-${{ github.sha }}
           path: |
             build/spelunkr360/Spelunkr360.xex
             build/spelunkr360/Spelunkr360.xex.sha256

@@ -153,9 +153,15 @@ static int remote_open(struct remote_file *remote, const char *url)
 if old not in src:
     raise SystemExit("expected V7A remote_open block not found")
 patched = src.replace(old, new, 1)
+if 'static const char *const CA_FILE = "cacert.pem";' not in patched:
+    raise SystemExit("expected V7A CA_FILE marker not found")
+patched = patched.replace('static const char *const CA_FILE = "cacert.pem";',
+                          'static const char *const CA_FILE = "ca.pem";', 1)
 if 'media HEAD curl=' in patched or 'media size unavailable' in patched:
     raise SystemExit("legacy HEAD media-open path survived patch")
 if 'initial range missing Content-Range total' not in patched:
     raise SystemExit("new range-open diagnostics missing")
+if 'static const char *const CA_FILE = "ca.pem";' not in patched:
+    raise SystemExit("short CA filename patch failed")
 out.write_text(patched)
-print(f"generated {out} with direct range media-open")
+print(f"generated {out} with direct range media-open and ca.pem")

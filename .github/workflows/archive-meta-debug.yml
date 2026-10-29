@@ -14,46 +14,72 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Inspect exact Toonami Archive file metadata pages and direct fields
+      - name: Inspect exact Toonami Archive file metadata and MP4 layout
         shell: bash
         run: |
           set -euo pipefail
           ID='ocwoc-081-toonami-full-cycle-marathon-cn-2000_202505'
           WANT='OCWOC 081 - Toonami Full Cycle Marathon (CN, 2000).ia.mp4'
           URL='https://archive.org/download/ocwoc-081-toonami-full-cycle-marathon-cn-2000_202505/OCWOC%20081%20-%20Toonami%20Full%20Cycle%20Marathon%20(CN%2C%202000).ia.mp4'
-          curl -fsSL "https://archive.org/metadata/${ID}/files_count" -o /tmp/count.json
-          echo "FILES_COUNT_RESPONSE=$(cat /tmp/count.json)"
+          curl -fsSL "https://archive.org/metadata/${ID}/files?start=0&count=24" -o /tmp/page.json
           python3 - <<'PY'
-          import json, urllib.request
-          ident='ocwoc-081-toonami-full-cycle-marathon-cn-2000_202505'
+          import json
+          obj=json.load(open('/tmp/page.json'))
           wanted='OCWOC 081 - Toonami Full Cycle Marathon (CN, 2000).ia.mp4'
-          found=None
-          for start in range(0,4096,24):
-              url=f'https://archive.org/metadata/{ident}/files?start={start}&count=24'
-              with urllib.request.urlopen(url, timeout=30) as r:
-                  raw=r.read()
-                  print('PAGE',start,'HTTP',r.status,'BYTES',len(raw))
-              obj=json.loads(raw)
-              rows=obj.get('result',[]) if isinstance(obj,dict) else []
-              print('RESULT_COUNT',len(rows))
-              for i,row in enumerate(rows):
-                  if isinstance(row,dict) and row.get('name')==wanted:
-                      found=start+i
-                      print('FOUND_INDEX',found)
-                      print('FOUND_ROW',json.dumps(row,separators=(',',':')))
-                      break
-              if found is not None or len(rows)<24:
-                  break
-          if found is None:
-              raise SystemExit('wanted file not found')
-          for field in ('name','size','length','width','height'):
-              url=f'https://archive.org/metadata/{ident}/files/{found}/{field}'
-              with urllib.request.urlopen(url, timeout=30) as r:
-                  raw=r.read()
-                  print('FIELD',field,'HTTP',r.status,'BYTES',len(raw),'BODY',raw.decode('utf-8','replace'))
+          rows=obj.get('result',[])
+          row=next(r for r in rows if r.get('name')==wanted)
+          print('FOUND_ROW',json.dumps(row,separators=(',',':')))
+          print('SIZE',row.get('size'))
           PY
 
-          echo '--- HEAD archive.org/download ---'
-          curl -sSIL "$URL" | sed -n '1,120p'
-          echo '--- RANGE archive.org/download ---'
-          curl -sSL -D - -o /dev/null -r 0-255 "$URL" | sed -n '1,160p'
+          SIZE=3755491138
+          curl -fsSL -r 0-1048575 "$URL" -o /tmp/head.bin
+          START=$((SIZE-1048576))
+          curl -fsSL -r "${START}-$((SIZE-1))" "$URL" -o /tmp/tail.bin
+
+          python3 - <<'PY'
+          import struct
+          total=3755491138
+          head=open('/tmp/head.bin','rb').read()
+          tail=open('/tmp/tail.bin','rb').read()
+          print('HEAD_BYTES',len(head),'TAIL_BYTES',len(tail))
+
+          def atom_at(buf, off, base=0):
+              if off+8>len(buf): return None
+              size=struct.unpack('>I',buf[off:off+4])[0]
+              typ=buf[off+4:off+8].decode('latin1')
+              header=8
+              if size==1:
+                  if off+16>len(buf): return None
+                  size=struct.unpack('>Q',buf[off+8:off+16])[0]
+                  header=16
+              elif size==0:
+                  size=total-(base+off)
+              return size,typ,header
+
+          off=0
+          print('TOP_LEVEL_FROM_START')
+          for _ in range(12):
+              a=atom_at(head,off,0)
+              if not a: break
+              size,typ,h=a
+              print(base:=off,typ,size)
+              if size<8: break
+              off += size
+              if off>=len(head): break
+
+          tail_base=total-len(tail)
+          for name,buf,base in [('HEAD',head,0),('TAIL',tail,tail_base)]:
+              for typ in (b'moov',b'mdat',b'ftyp'):
+                  pos=0
+                  while True:
+                      i=buf.find(typ,pos)
+                      if i<0: break
+                      if i>=4:
+                          small=struct.unpack('>I',buf[i-4:i])[0]
+                          ext=None
+                          if small==1 and i+12<=len(buf):
+                              ext=struct.unpack('>Q',buf[i+4:i+12])[0]
+                          print(name,'ATOM_MARK',typ.decode(), 'TYPE_AT',base+i,'SIZE32',small,'EXT',ext)
+                      pos=i+4
+          PY

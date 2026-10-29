@@ -37,6 +37,7 @@ set(V7A_RANGE_MAIN "${CMAKE_CURRENT_BINARY_DIR}/main_range_open.c")
 set(V7A_PAGED_MAIN "${CMAKE_CURRENT_BINARY_DIR}/main_archive_pages.c")
 set(V7A_SIZE64_MAIN "${CMAKE_CURRENT_BINARY_DIR}/main_size64.c")
 set(V7A_DIAG8_MAIN "${CMAKE_CURRENT_BINARY_DIR}/main_diag8.c")
+set(V7A_MOOV9_MAIN "${CMAKE_CURRENT_BINARY_DIR}/main_moov9.c")
 execute_process(
   COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/patch_range_open.py"
           "${CMAKE_CURRENT_SOURCE_DIR}/main.c" "${V7A_RANGE_MAIN}"
@@ -85,8 +86,20 @@ if(NOT V7A_DIAG8_PATCH_RESULT EQUAL 0)
 endif()
 message(STATUS "${V7A_DIAG8_PATCH_STDOUT}")
 
+execute_process(
+  COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/patch_moov9.py"
+          "${V7A_DIAG8_MAIN}" "${V7A_MOOV9_MAIN}"
+  RESULT_VARIABLE V7A_MOOV9_PATCH_RESULT
+  OUTPUT_VARIABLE V7A_MOOV9_PATCH_STDOUT
+  ERROR_VARIABLE V7A_MOOV9_PATCH_STDERR
+)
+if(NOT V7A_MOOV9_PATCH_RESULT EQUAL 0)
+  message(FATAL_ERROR "V7A.9 moov-prefetch source generation failed: ${V7A_MOOV9_PATCH_STDERR}")
+endif()
+message(STATUS "${V7A_MOOV9_PATCH_STDOUT}")
+
 add_executable(Spelunkr360V7A
-  "${V7A_DIAG8_MAIN}"
+  "${V7A_MOOV9_MAIN}"
   newlib_compat.c
   ../spelunkr360_v6c/schedule_core.c
 )
@@ -105,6 +118,6 @@ target_link_libraries(Spelunkr360V7A PRIVATE
 )
 target_compile_options(Spelunkr360V7A PRIVATE -Wall -Wextra -Werror -O2)
 xsdk_add_shaders(Spelunkr360V7A frame.vert frame.frag)
-xsdk_add_xex(Spelunkr360V7A TITLE_ID 0x53503601 NAME "Spelunkr360" VERSION 0.7.0.8)
+xsdk_add_xex(Spelunkr360V7A TITLE_ID 0x53503601 NAME "Spelunkr360" VERSION 0.7.0.9)
 
 configure_file("${MBEDTLS_XENON_DIR}/programs/xsdk/cacert.pem" ca.pem COPYONLY)

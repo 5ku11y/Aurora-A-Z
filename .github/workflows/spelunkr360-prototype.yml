@@ -43,10 +43,12 @@ jobs:
           git clone --filter=blob:none --no-checkout https://github.com/xenosworks/mbedtls-xenon.git "${MBEDTLS_XENON_ROOT}"
           git -C "${MBEDTLS_XENON_ROOT}" checkout --detach "${MBEDTLS_XENON_COMMIT}"
           test "$(git -C "${MBEDTLS_XENON_ROOT}" rev-parse HEAD)" = "${MBEDTLS_XENON_COMMIT}"
+          git -C "${MBEDTLS_XENON_ROOT}" submodule update --init --recursive
 
           git clone --filter=blob:none --no-checkout https://github.com/xenosworks/curl-xenon.git "${CURL_XENON_ROOT}"
           git -C "${CURL_XENON_ROOT}" checkout --detach "${CURL_XENON_COMMIT}"
           test "$(git -C "${CURL_XENON_ROOT}" rev-parse HEAD)" = "${CURL_XENON_COMMIT}"
+          git -C "${CURL_XENON_ROOT}" submodule update --init --recursive
 
       - name: Restore xsdk GCC toolchain
         id: xsdk-cache

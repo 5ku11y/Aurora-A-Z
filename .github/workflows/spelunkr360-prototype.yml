@@ -1,4 +1,4 @@
-name: Spelunkr360 prototype
+name: Spelunkr360 V3 real-present probe
 
 on:
   push:
@@ -12,133 +12,73 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 240
+    timeout-minutes: 90
     env:
-      OPENXECHAIN_BUILDSCRIPT_COMMIT: eed1fa65bf9577fd31625764b320a90182ea9ade
-      OPENXECHAIN_LLVM_COMMIT: 890b83f6c8259a8899e182a5f7d9cf39c64131cc
-      OPENXECHAIN_NEWLIB_COMMIT: f929633c27099d404e9cb5b2739a9c7f9b6afccc
-      OPENXECHAIN_ROOT: /home/runner/work/_temp/openxechain-prefix
-      OPENXECHAIN_CACHE_KEY: openxechain-linux-x64-v2-eed1fa65bf9577fd31625764b320a90182ea9ade
-      OPENXECHAIN_SYNTHXEX_COMMIT: 48d1453a55468aa2f8a211db0b20edd594ef5be3
-      OPENXECHAIN_XECORELIB_COMMIT: c65d67e071357acade681f04c46ae9719797f239
+      XSDK_COMMIT: 8c58c7a3fb37bb261c5a11a8a1f4fa8a8bfd0d28
+      XSDK_ROOT: /home/runner/work/_temp/xsdk-source
+      XSDK_TOOLCHAIN: /home/runner/work/_temp/xsdk-gcc
+      XSDK_TOOLCHAIN_CACHE: xsdk-gcc15-v1-8c58c7a3fb37bb261c5a11a8a1f4fa8a8bfd0d28
 
     steps:
-      - name: Check out branch
+      - name: Check out Spelunkr branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      - name: Restore pinned OpenXeChain toolchain
-        id: toolchain-cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: ${{ env.OPENXECHAIN_ROOT }}
-          key: ${{ env.OPENXECHAIN_CACHE_KEY }}
-
-      - name: Reclaim disk space for toolchain fallback
-        if: steps.toolchain-cache.outputs.cache-hit != 'true'
-        run: |
-          sudo rm -rf -- /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache
-          df -h /
-
-      - name: Install host build dependencies for toolchain fallback
-        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+      - name: Install xsdk host dependencies
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
-            bash binutils build-essential bzip2 ca-certificates clang cmake \
-            findutils gawk git gzip make ninja-build python3 python3-yaml \
-            sed tar unzip zip zlib1g-dev zstd
+            build-essential bison flex texinfo libgmp-dev libmpfr-dev libmpc-dev \
+            curl xz-utils patch python3 cmake ninja-build git
 
-      - name: Fetch pinned OpenXeChain sources on cache miss
-        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+      - name: Fetch pinned xsdk
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/xenosworks/xsdk.git "${XSDK_ROOT}"
+          git -C "${XSDK_ROOT}" checkout --detach "${XSDK_COMMIT}"
+          test "$(git -C "${XSDK_ROOT}" rev-parse HEAD)" = "${XSDK_COMMIT}"
+
+      - name: Restore xsdk GCC toolchain
+        id: xsdk-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ env.XSDK_TOOLCHAIN }}
+          key: ${{ env.XSDK_TOOLCHAIN_CACHE }}
+
+      - name: Build xsdk GCC toolchain on cache miss
+        if: steps.xsdk-cache.outputs.cache-hit != 'true'
         env:
-          SOURCE_DIR: /home/runner/work/_temp/openxechain-source
+          PREFIX: ${{ env.XSDK_TOOLCHAIN }}
+          WORK: /home/runner/work/_temp/xsdk-gcc-work
+          JOBS: 4
         run: |
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
-          git clone --filter=blob:none --no-checkout https://github.com/OpenXeChain/buildscript.git "${SOURCE_DIR}"
-          git -C "${SOURCE_DIR}" checkout --detach "${OPENXECHAIN_BUILDSCRIPT_COMMIT}"
-          git -C "${SOURCE_DIR}" submodule sync --recursive
-          git -C "${SOURCE_DIR}" submodule update --init --recursive --depth 1 --jobs 4
-          test "$(git -C "${SOURCE_DIR}" rev-parse HEAD)" = "${OPENXECHAIN_BUILDSCRIPT_COMMIT}"
-          test "$(git -C "${SOURCE_DIR}/llvm" rev-parse HEAD)" = "${OPENXECHAIN_LLVM_COMMIT}"
-          test "$(git -C "${SOURCE_DIR}/newlib" rev-parse HEAD)" = "${OPENXECHAIN_NEWLIB_COMMIT}"
-          test "$(git -C "${SOURCE_DIR}/synthxex" rev-parse HEAD)" = "${OPENXECHAIN_SYNTHXEX_COMMIT}"
-          test "$(git -C "${SOURCE_DIR}/xecorelib" rev-parse HEAD)" = "${OPENXECHAIN_XECORELIB_COMMIT}"
+          cd "${XSDK_ROOT}"
+          tools/toolchain/build.sh
 
-      - name: Apply pinned Newlib preprocessor fix on cache miss
-        if: steps.toolchain-cache.outputs.cache-hit != 'true'
-        env:
-          SOURCE_DIR: /home/runner/work/_temp/openxechain-source
-        run: |
-          patch_file="${GITHUB_WORKSPACE}/scripts/openxechain-newlib-cpp.patch"
-          git -C "${SOURCE_DIR}" apply --check "${patch_file}"
-          git -C "${SOURCE_DIR}" apply "${patch_file}"
-          git -C "${SOURCE_DIR}" diff --check
-
-      - name: Build pinned OpenXeChain toolchain on cache miss
-        if: steps.toolchain-cache.outputs.cache-hit != 'true'
-        env:
-          PREFIX: /home/runner/work/_temp/openxechain-prefix
-          SOURCE_DIR: /home/runner/work/_temp/openxechain-source
-          PARALLEL: 4
-          BUILD_TYPE: Release
-          HOST_CC: clang
-          HOST_CXX: clang++
-        run: |
-          cd "${SOURCE_DIR}"
-          ./build-toolchain.sh
-
-      - name: Verify OpenXeChain tools
-        run: |
-          test -x "${OPENXECHAIN_ROOT}/bin/clang"
-          test -x "${OPENXECHAIN_ROOT}/bin/lld-link"
-          test -x "${OPENXECHAIN_ROOT}/bin/synthxex"
-          "${OPENXECHAIN_ROOT}/bin/clang" --version
-
-      - name: Save pinned OpenXeChain toolchain after fallback
-        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+      - name: Save xsdk GCC toolchain after cache miss
+        if: steps.xsdk-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
-          path: ${{ env.OPENXECHAIN_ROOT }}
-          key: ${{ env.OPENXECHAIN_CACHE_KEY }}
+          path: ${{ env.XSDK_TOOLCHAIN }}
+          key: ${{ env.XSDK_TOOLCHAIN_CACHE }}
 
-      - name: Build patched SynthXEX
-        env:
-          SYNTHXEX_SOURCE_DIR: /home/runner/work/_temp/spelunkr360-synthxex-source
-          SYNTHXEX_BUILD_DIR: /home/runner/work/_temp/spelunkr360-synthxex-build
+      - name: Verify xsdk compiler
         run: |
-          git clone --filter=blob:none --no-checkout https://github.com/OpenXeChain/SynthXEX.git "${SYNTHXEX_SOURCE_DIR}"
-          git -C "${SYNTHXEX_SOURCE_DIR}" checkout --detach "${OPENXECHAIN_SYNTHXEX_COMMIT}"
-          patch_file="${GITHUB_WORKSPACE}/scripts/openxechain-synthxex-image-base.patch"
-          git -C "${SYNTHXEX_SOURCE_DIR}" apply --check "${patch_file}"
-          git -C "${SYNTHXEX_SOURCE_DIR}" apply "${patch_file}"
-          python3 "${GITHUB_WORKSPACE}/scripts/patch-spelunkr-synthxex-titleid.py" "${SYNTHXEX_SOURCE_DIR}"
-          git -C "${SYNTHXEX_SOURCE_DIR}" diff --check
-          cmake -S "${SYNTHXEX_SOURCE_DIR}" -B "${SYNTHXEX_BUILD_DIR}" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="${OPENXECHAIN_ROOT}"
-          cmake --build "${SYNTHXEX_BUILD_DIR}" --parallel 2
-          cmake --install "${SYNTHXEX_BUILD_DIR}"
+          test -x "${XSDK_TOOLCHAIN}/bin/powerpc-xsdk-elf-gcc"
+          "${XSDK_TOOLCHAIN}/bin/powerpc-xsdk-elf-gcc" --version
 
-      - name: Build Spelunkr360 title
+      - name: Build xsdk runtime
         run: |
-          mkdir -p build/spelunkr360
-          "${OPENXECHAIN_ROOT}/bin/clang" \
-            -std=c99 -Oz -fno-zero-initialized-in-bss \
-            -Wall -Wextra -Werror \
-            -Inative/include \
-            native/src/spelunkr360_main.c \
-            -Wl,/entry:main \
-            -Wl,/base:0x82D50000 \
-            -Wl,/filealign:128 \
-            -Wl,/align:65536 \
-            -Wl,/opt:ref \
-            -o build/spelunkr360/Spelunkr360.dll
-          "${OPENXECHAIN_ROOT}/bin/synthxex" \
-            -t title \
-            -i build/spelunkr360/Spelunkr360.dll \
-            -o build/spelunkr360/Spelunkr360.xex
-          (cd build/spelunkr360 && sha256sum Spelunkr360.xex > Spelunkr360.xex.sha256)
+          make -C "${XSDK_ROOT}" -j4 TOOLCHAIN="${XSDK_TOOLCHAIN}/bin/powerpc-xsdk-elf-"
+          test -f "${XSDK_ROOT}/build/libxsdk.a"
 
-      - name: Validate Spelunkr360 V2
+      - name: Build Spelunkr360 V3
+        run: |
+          cmake -S native/spelunkr360_v3 -B build/spelunkr360_v3 -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="${XSDK_ROOT}/cmake/xsdk.cmake" \
+            -DXSDK_TOOLCHAIN="${XSDK_TOOLCHAIN}"
+          cmake --build build/spelunkr360_v3
+          sha256sum build/spelunkr360_v3/Spelunkr360.xex > build/spelunkr360_v3/Spelunkr360.xex.sha256
+
+      - name: Validate Spelunkr360 V3 XEX
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -146,20 +86,10 @@ jobs:
 
           TITLE_ID = 0x53503601
           EXECUTION_ID_HEADER = 0x00040006
-
-          p = Path('build/spelunkr360/Spelunkr360.xex')
+          p = Path('build/spelunkr360_v3/Spelunkr360.xex')
           data = p.read_bytes()
           if data[:4] != b'XEX2':
-              raise SystemExit('Spelunkr360 is not XEX2')
-
-          for needle in (
-              b'Spelunkr360 V2 safe-screen TitleID 53503601',
-              b'game:\\index.html',
-              b'game:\\cover.png',
-          ):
-              if needle not in data:
-                  raise SystemExit(f'missing Spelunkr360 V2 marker: {needle!r}')
-
+              raise SystemExit('Spelunkr360 V3 is not XEX2')
           count = struct.unpack_from('>I', data, 0x14)[0]
           execution_offset = None
           for index in range(count):
@@ -168,27 +98,24 @@ jobs:
                   execution_offset = value
                   break
           if execution_offset is None:
-              raise SystemExit('Spelunkr360 V2 has no 0x40006 Execution ID')
-          if execution_offset + 24 > len(data):
-              raise SystemExit('Spelunkr360 V2 Execution ID is out of range')
+              raise SystemExit('Spelunkr360 V3 has no Execution ID')
           title_id = struct.unpack_from('>I', data, execution_offset + 12)[0]
           if title_id != TITLE_ID:
-              raise SystemExit(f'wrong Spelunkr360 TitleID: {title_id:08X}')
-
-          print(
-              f'validated Spelunkr360 V2 XEX2: {p} '
-              f'({p.stat().st_size} bytes), TitleID={title_id:08X}'
-          )
+              raise SystemExit(f'wrong TitleID: {title_id:08X}')
+          for marker in (b'Spelunkr360', b'SPELUNKR360 V3', b'CH 53 - TOONERTIA'):
+              if marker not in data:
+                  raise SystemExit(f'missing marker {marker!r}')
+          print(f'validated {p} ({p.stat().st_size} bytes), TitleID={title_id:08X}')
           PY
-          (cd build/spelunkr360 && sha256sum --check Spelunkr360.xex.sha256)
+          sha256sum --check build/spelunkr360_v3/Spelunkr360.xex.sha256
 
-      - name: Upload Spelunkr360 V2
+      - name: Upload Spelunkr360 V3
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: Spelunkr360-V2-${{ github.sha }}
+          name: Spelunkr360-V3-${{ github.sha }}
           path: |
-            build/spelunkr360/Spelunkr360.xex
-            build/spelunkr360/Spelunkr360.xex.sha256
+            build/spelunkr360_v3/Spelunkr360.xex
+            build/spelunkr360_v3/Spelunkr360.xex.sha256
           if-no-files-found: error
           retention-days: 14
           compression-level: 0

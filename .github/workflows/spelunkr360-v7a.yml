@@ -1,0 +1,206 @@
+name: Spelunkr360 V7A live video frame probe
+
+on:
+  push:
+    branches:
+      - spelunkr360-prototype
+    paths:
+      - 'native/spelunkr360_v7a/**'
+      - 'native/spelunkr360_v6c/schedule_core.c'
+      - 'native/spelunkr360_v6c/schedule_core.h'
+      - '.github/workflows/spelunkr360-v7a.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      XSDK_COMMIT: 8c58c7a3fb37bb261c5a11a8a1f4fa8a8bfd0d28
+      CURL_XENON_COMMIT: a6b70bd06820e1c625f47fe0e592e08c5daaa6b4
+      MBEDTLS_XENON_COMMIT: 591b04adbec4bc5582649601f4407506a610162b
+      FFMPEG_COMMIT: b08d7969c550a804a59511c7b83f2dd8cc0499b8
+      XSDK_ROOT: /home/runner/work/_temp/xsdk-source
+      CURL_XENON_ROOT: /home/runner/work/_temp/curl-xenon
+      MBEDTLS_XENON_ROOT: /home/runner/work/_temp/mbedtls-xenon
+      FFMPEG_ROOT: /home/runner/work/_temp/ffmpeg-source
+      FFMPEG_PREFIX: /home/runner/work/_temp/ffmpeg-xsdk
+      XSDK_TOOLCHAIN: /home/runner/work/_temp/xsdk-gcc
+      XSDK_TOOLCHAIN_CACHE: xsdk-gcc15-v1-8c58c7a3fb37bb261c5a11a8a1f4fa8a8bfd0d28
+      FFMPEG_CACHE: ffmpeg-v7a-xsdk-v1-b08d7969c550a804a59511c7b83f2dd8cc0499b8
+
+    steps:
+      - name: Check out Spelunkr branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential bison flex texinfo libgmp-dev libmpfr-dev libmpc-dev \
+            curl xz-utils patch python3 cmake ninja-build git pkg-config
+
+      - name: Fetch pinned xsdk and network libraries
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/xenosworks/xsdk.git "${XSDK_ROOT}"
+          git -C "${XSDK_ROOT}" checkout --detach "${XSDK_COMMIT}"
+          test "$(git -C "${XSDK_ROOT}" rev-parse HEAD)" = "${XSDK_COMMIT}"
+
+          git clone --filter=blob:none --no-checkout https://github.com/xenosworks/mbedtls-xenon.git "${MBEDTLS_XENON_ROOT}"
+          git -C "${MBEDTLS_XENON_ROOT}" checkout --detach "${MBEDTLS_XENON_COMMIT}"
+          test "$(git -C "${MBEDTLS_XENON_ROOT}" rev-parse HEAD)" = "${MBEDTLS_XENON_COMMIT}"
+          git -C "${MBEDTLS_XENON_ROOT}" submodule update --init --recursive
+
+          git clone --filter=blob:none --no-checkout https://github.com/xenosworks/curl-xenon.git "${CURL_XENON_ROOT}"
+          git -C "${CURL_XENON_ROOT}" checkout --detach "${CURL_XENON_COMMIT}"
+          test "$(git -C "${CURL_XENON_ROOT}" rev-parse HEAD)" = "${CURL_XENON_COMMIT}"
+          git -C "${CURL_XENON_ROOT}" submodule update --init --recursive
+
+      - name: Restore xsdk GCC toolchain
+        id: xsdk-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ env.XSDK_TOOLCHAIN }}
+          key: ${{ env.XSDK_TOOLCHAIN_CACHE }}
+
+      - name: Build xsdk GCC toolchain on cache miss
+        if: steps.xsdk-cache.outputs.cache-hit != 'true'
+        env:
+          PREFIX: ${{ env.XSDK_TOOLCHAIN }}
+          WORK: /home/runner/work/_temp/xsdk-gcc-work
+          JOBS: 4
+        run: |
+          cd "${XSDK_ROOT}"
+          bash tools/toolchain/build.sh
+
+      - name: Save xsdk GCC toolchain after cache miss
+        if: steps.xsdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ env.XSDK_TOOLCHAIN }}
+          key: ${{ env.XSDK_TOOLCHAIN_CACHE }}
+
+      - name: Verify xsdk compiler
+        run: |
+          test -x "${XSDK_TOOLCHAIN}/bin/powerpc-xsdk-elf-gcc"
+          "${XSDK_TOOLCHAIN}/bin/powerpc-xsdk-elf-gcc" --version
+
+      - name: Build xsdk runtime
+        run: |
+          make -C "${XSDK_ROOT}" -j4 TOOLCHAIN="${XSDK_TOOLCHAIN}/bin/powerpc-xsdk-elf-"
+          test -f "${XSDK_ROOT}/build/libxsdk.a"
+
+      - name: Restore minimal FFmpeg cache
+        id: ffmpeg-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ env.FFMPEG_PREFIX }}
+          key: ${{ env.FFMPEG_CACHE }}
+
+      - name: Build minimal FFmpeg H264 MOV stack on cache miss
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/FFmpeg/FFmpeg.git "${FFMPEG_ROOT}"
+          git -C "${FFMPEG_ROOT}" checkout --detach "${FFMPEG_COMMIT}"
+          test "$(git -C "${FFMPEG_ROOT}" rev-parse HEAD)" = "${FFMPEG_COMMIT}"
+          cd "${FFMPEG_ROOT}"
+          ./configure \
+            --prefix="${FFMPEG_PREFIX}" \
+            --enable-cross-compile \
+            --cc="${XSDK_TOOLCHAIN}/bin/powerpc-xsdk-elf-gcc" \
+            --ar="${XSDK_TOOLCHAIN}/bin/powerpc-xsdk-elf-ar" \
+            --ranlib="${XSDK_TOOLCHAIN}/bin/powerpc-xsdk-elf-ranlib" \
+            --nm="${XSDK_TOOLCHAIN}/bin/powerpc-xsdk-elf-nm" \
+            --strip="${XSDK_TOOLCHAIN}/bin/powerpc-xsdk-elf-strip" \
+            --arch=ppc --cpu=cell --target-os=none \
+            --disable-everything --disable-autodetect \
+            --enable-avformat --enable-avcodec --enable-avutil \
+            --enable-decoder=h264 --enable-parser=h264 --enable-demuxer=mov \
+            --disable-programs --disable-doc --disable-network \
+            --disable-avdevice --disable-swscale --disable-swresample --disable-avfilter \
+            --disable-pthreads --disable-w32threads --disable-os2threads \
+            --disable-runtime-cpudetect --disable-asm --disable-altivec --disable-vsx --disable-power8 \
+            --disable-iconv --disable-zlib --disable-bzlib --disable-lzma \
+            --disable-debug --enable-static --disable-shared \
+            --extra-cflags='-O2 -fno-strict-aliasing'
+          make -j4
+          make install
+          test -f "${FFMPEG_PREFIX}/lib/libavformat.a"
+          test -f "${FFMPEG_PREFIX}/lib/libavcodec.a"
+          test -f "${FFMPEG_PREFIX}/lib/libavutil.a"
+
+      - name: Save minimal FFmpeg cache after build
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ env.FFMPEG_PREFIX }}
+          key: ${{ env.FFMPEG_CACHE }}
+
+      - name: Build Spelunkr360 V7A live video frame probe
+        run: |
+          cmake -S native/spelunkr360_v7a -B build/spelunkr360_v7a -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="${XSDK_ROOT}/cmake/xsdk.cmake" \
+            -DXSDK_TOOLCHAIN="${XSDK_TOOLCHAIN}" \
+            -DMBEDTLS_XENON_DIR="${MBEDTLS_XENON_ROOT}" \
+            -DCURL_XENON_DIR="${CURL_XENON_ROOT}" \
+            -DFFMPEG_XSDK_DIR="${FFMPEG_PREFIX}" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/spelunkr360_v7a
+          sha256sum build/spelunkr360_v7a/Spelunkr360V7A.xex > build/spelunkr360_v7a/Spelunkr360V7A.xex.sha256
+
+      - name: Validate Spelunkr360 V7A package
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import struct
+
+          TITLE_ID = 0x53503601
+          EXECUTION_ID_HEADER = 0x00040006
+          RESOURCE_INFO_HEADER = 0x000002FF
+          p = Path('build/spelunkr360_v7a/Spelunkr360V7A.xex')
+          ca = Path('build/spelunkr360_v7a/cacert.pem')
+          data = p.read_bytes()
+          if data[:4] != b'XEX2':
+              raise SystemExit('V7A is not XEX2')
+          count = struct.unpack_from('>I', data, 0x14)[0]
+          headers = {}
+          for index in range(count):
+              header_id, value = struct.unpack_from('>II', data, 0x18 + index * 8)
+              headers[header_id] = value
+          execution_offset = headers.get(EXECUTION_ID_HEADER)
+          if execution_offset is None:
+              raise SystemExit('V7A has no Execution ID')
+          title_id = struct.unpack_from('>I', data, execution_offset + 12)[0]
+          if title_id != TITLE_ID:
+              raise SystemExit(f'wrong TitleID: {title_id:08X}')
+          resource_offset = headers.get(RESOURCE_INFO_HEADER)
+          if resource_offset is None:
+              raise SystemExit('V7A has no XEX resource-info header')
+          resource_name = data[resource_offset + 4:resource_offset + 12]
+          resource_size = struct.unpack_from('>I', data, resource_offset + 16)[0]
+          if resource_name != b'53503601' or resource_size == 0:
+              raise SystemExit('V7A dashboard title resource is invalid')
+          for marker in (
+              b'Spelunkr360', b'SPELUNKR360 V7A', b'LIVE VIDEO FRAME PROBE',
+              b'DECODED ARCHIVE.ORG FRAME - PASS', b'VIDEO FRAME TEST: FAIL',
+              b'NOW PLAYING', b'TARGET POSITION', b'RANGE HTTP'):
+              if marker not in data:
+                  raise SystemExit(f'missing marker {marker!r}')
+          if not ca.is_file() or ca.stat().st_size < 100000:
+              raise SystemExit('cacert.pem missing or unexpectedly small')
+          print(f'validated {p} ({p.stat().st_size} bytes), TitleID={title_id:08X}, CA={ca.stat().st_size} bytes')
+          PY
+
+      - name: Upload Spelunkr360 V7A
+        uses: actions/upload-artifact@v4
+        with:
+          name: Spelunkr360-V7A-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            build/spelunkr360_v7a/Spelunkr360V7A.xex
+            build/spelunkr360_v7a/Spelunkr360V7A.xex.sha256
+            build/spelunkr360_v7a/cacert.pem

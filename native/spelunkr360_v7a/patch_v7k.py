@@ -34,7 +34,9 @@ src = src.replace('V7J foreground partial salvaged', 'V7K foreground partial sal
 src = src.replace('V7J prefetch thread: creator_ht=', 'V7K prefetch thread: creator_ht=')
 
 # Clean loading presentation. Keep v7_stage as the same low-risk single-frame
-# status presenter, only replace its engineering copy.
+# status presenter, only replace its engineering copy. The fast-start split is
+# printed by the loader itself so the visible proof marker does not depend on
+# legacy stage wording surviving the earlier patch chain.
 stage_begin = src.find('static uint32_t g_stage_width;')
 stage_end = src.find('static void ff_error_text(', stage_begin)
 if stage_begin < 0 or stage_end <= stage_begin:
@@ -51,6 +53,7 @@ static void v7_stage(const char *stage)
         "CH 53 // TOONERTIA\n\n"
         "STARTING LIVE CHANNEL\n\n"
         "%s\n\n"
+        "4 MB FAST START / 8 MB ASYNC PLAYBACK\n"
         "B/BACK/START: CANCEL",
         stage);
     (void)present_status(g_stage_width, g_stage_height, text, GOOD_ARGB);
@@ -59,7 +62,9 @@ static void v7_stage(const char *stage)
 '''
 src = src[:stage_begin] + stage_helper + src[stage_end:]
 
-# Replace old probe/debug stage copy with viewer-facing loading states.
+# Replace old probe/debug stage copy with viewer-facing loading states where the
+# old wording is still present. The loader wrapper above keeps presentation
+# clean even if an earlier patch changed one of these strings.
 stage_replacements = {
     'STAGE 1/5: DOWNLOADING 17 MB MP4 HEADER...\\nTHIS CAN TAKE MORE THAN 30 SECONDS ON XBOX 360.':
         'READING MEDIA INDEX...\\nPREPARING CURRENT PROGRAM.',
@@ -74,7 +79,7 @@ stage_replacements = {
     'STAGE 5/5: READING / DECODING H.264 FRAME...':
         'STARTING VIDEO...',
     'V7B.3: PREPARING LIVE VIDEO...\\n16 MB CACHE / 8 MB ASYNC PREFETCH.\\nSTREAMING CLOCK WILL RE-SYNC AFTER REFILLS.':
-        'BUFFERING LIVE TV...\\n4 MB FAST START / 8 MB ASYNC PLAYBACK.',
+        'BUFFERING LIVE TV...',
 }
 for old, new in stage_replacements.items():
     src = src.replace(old, new)

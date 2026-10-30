@@ -33,23 +33,24 @@ src = src.replace('V7L foreground partial salvaged', 'V7M foreground partial sal
 src = src.replace('V7L prefetch thread: creator_ht=', 'V7M prefetch thread: creator_ht=')
 
 # Remove the old main() diagnostic/status page that V7L hardware showed after
-# roughly three seconds. Match semantic tokens only: the generated source has
-# gone through many patch layers, so whitespace/indentation is not stable.
+# roughly three seconds. V7B replaced decode_picture() in main() with the
+# hardware-proven play_video_continuous() call, so use that actual handoff as
+# the end boundary. Match semantic tokens only; whitespace is not stable.
 status_key = '"NOW PLAYING: %s\\nTARGET POSITION: %s\\nARCHIVE ID: %s\\n\\n"'
 key_at = src.find(status_key)
 if key_at < 0:
     raise SystemExit('V7M legacy target-position text marker missing')
 snprintf_at = src.rfind('snprintf(status_text', 0, key_at)
-decode_at = src.find('decode_picture(', key_at)
-if snprintf_at < 0 or decode_at <= snprintf_at:
+play_at = src.find('play_video_continuous(', key_at)
+if snprintf_at < 0 or play_at <= snprintf_at:
     raise SystemExit('V7M legacy status-page semantic boundaries missing')
 status_begin = src.rfind('\n', 0, snprintf_at) + 1
-decode_line = src.rfind('\n', 0, decode_at) + 1
-if decode_line <= status_begin:
+play_line = src.rfind('\n', 0, play_at) + 1
+if play_line <= status_begin:
     raise SystemExit('V7M legacy status-page line boundaries missing')
 src = (src[:status_begin] +
        '    v7_stage("PROGRAM LOCATED - OPENING LIVE VIDEO...");\n\n' +
-       src[decode_line:])
+       src[play_line:])
 
 # The MOV demuxer is already forced. The generic stream-info scan is therefore
 # unnecessary for this known H.264/AAC MP4 path and may perform several extra

@@ -13,8 +13,7 @@ out = Path(sys.argv[2])
 # - make it look like an intentional SPELUNKR TV tuning screen;
 # - show real elapsed time plus an honest network-dependent startup estimate;
 # - refresh the loader during blocking curl transfers so it never looks frozen;
-# - reuse the schedule curl easy handle across lineup/manifest/platform requests
-#   so DNS/TLS connections can be reused instead of rebuilt three times;
+# - preserve the already-fast schedule fetch/cleanup lifecycle;
 # - preserve V7M's fast MOV track-open and V7J's hardware-proven playback core.
 
 src = src.replace(
@@ -133,7 +132,7 @@ static void v7n_render_loader(const char *stage, unsigned network_percent)
     snprintf(percent_text, sizeof(percent_text), "%u%%", percent);
     v7n_time_text(elapsed_s, elapsed_text, sizeof(elapsed_text));
     snprintf(timing_text, sizeof(timing_text),
-        "ELAPSED %s   |   EXPECTED START 1-5 MIN   |   NETWORK / ARCHIVE SERVER DEPENDENT",
+        "ELAPSED %s   |   TYPICAL START 1-5 MIN   |   NETWORK / ARCHIVE SERVER DEPENDENT",
         elapsed_text);
     if (network_percent > 0u)
         snprintf(network_text, sizeof(network_text),
@@ -231,51 +230,6 @@ src = src.replace(
     1
 )
 
-# Reuse one easy handle for the three Supabase schedule fetches. curl_easy_reset
-# keeps the connection/DNS cache, which can avoid repeated DNS/TLS setup while
-# still letting each request install fresh callbacks and buffers.
-fetch_begin = src.find('static struct http_result fetch_url(')
-fetch_end = src.find('\nstatic void adapt_platform_schema_marker(', fetch_begin)
-if fetch_begin < 0 or fetch_end <= fetch_begin:
-    raise SystemExit('V7N fetch_url boundaries missing')
-fetch_block = src[fetch_begin:fetch_end]
-
-old_decl = '    CURL *curl = NULL;\n'
-if old_decl not in fetch_block:
-    raise SystemExit('V7N fetch_url curl declaration missing')
-fetch_block = fetch_block.replace(old_decl, '    static CURL *curl = NULL;\n', 1)
-
-old_init = '''    curl = curl_easy_init();
-    if (curl == NULL) {
-        snprintf(result.error, sizeof(result.error), "curl_easy_init failed");
-        return result;
-    }
-    set_common_curl(curl, url);'''
-new_init = '''    if (curl == NULL) {
-        curl = curl_easy_init();
-        if (curl == NULL) {
-            snprintf(result.error, sizeof(result.error), "curl_easy_init failed");
-            return result;
-        }
-    } else {
-        /* reset options but preserve libcurl's live connection and DNS cache */
-        curl_easy_reset(curl);
-    }
-    set_common_curl(curl, url);'''
-if old_init not in fetch_block:
-    raise SystemExit('V7N fetch_url init block missing')
-fetch_block = fetch_block.replace(old_init, new_init, 1)
-
-old_cleanup = '    curl_easy_cleanup(curl);\n    return result;\n'
-if old_cleanup not in fetch_block:
-    raise SystemExit('V7N fetch_url per-request cleanup missing')
-fetch_block = fetch_block.replace(old_cleanup, '    return result;\n', 1)
-src = src[:fetch_begin] + fetch_block + src[fetch_end:]
-
-# A long-lived schedule handle is intentionally reclaimed by process teardown;
-# curl_global_cleanup follows only when the title exits. This keeps the change
-# surgical and avoids touching the proven media remote/prefetch handles.
-
 # Hardware-visible playback proof marker.
 src = src.replace('| RANGE HTTP %ld | CONTINUOUS | PF 8MB / 2s | V7M FAST TRACK\\n',
                   '| RANGE HTTP %ld | CONTINUOUS | PF 8MB / 2s | V7N SPELUNKR TV\\n', 1)
@@ -284,17 +238,16 @@ for needle in (
     'SPELUNKR360 V7N - SPELUNKR TV TIMED LOADER + FAST OPEN',
     'SPELUNKR TV',
     'TOONERTIA // LIVE BROADCAST',
-    'EXPECTED START 1-5 MIN',
+    'TYPICAL START 1-5 MIN',
     'NETWORK / ARCHIVE SERVER DEPENDENT',
     'v7n_loading_progress',
     'g_v7n_loader_active = false',
-    'curl_easy_reset(curl)',
+    'FAST TRACK OPEN // 4 MB DEMAND IO // 8 MB ASYNC PLAYBACK BUFFER',
     'V7N SPELUNKR TV',
     'READING MP4 TRACK TABLE',
-    '4 MB DEMAND OPEN / 8 MB ASYNC PLAYBACK',
 ):
     if needle not in src:
         raise SystemExit(f'V7N marker missing: {needle}')
 
 out.write_text(src)
-print(f"generated {out} with V7N persistent Spelunkr TV loader, elapsed/ETA display and connection reuse")
+print(f"generated {out} with V7N persistent Spelunkr TV loader, elapsed/startup-range display and V7M fast open")

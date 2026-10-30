@@ -56,6 +56,16 @@ for needle in (
     if needle not in src:
         raise SystemExit(f'V7B.3 marker missing: {needle}')
 
+# V7C replaces V7B's wall-clock pacing with an audio-master clock. Strip the
+# two V7B timing helpers before the V7C transform so -Werror does not reject
+# the generated source as unused code.
+helper_start = src.find('static int64_t v7b_wall_ms(void)')
+play_start = src.find('static int play_video_continuous(')
+if helper_start >= 0 and play_start > helper_start:
+    src = src[:helper_start] + src[play_start:]
+else:
+    raise SystemExit('V7C could not locate obsolete V7B timing helpers')
+
 # Write the hardware-proven V7B.3 intermediate, then layer V7C audio/A-V sync on top.
 out.write_text(src)
 v7c = Path(__file__).with_name('patch_v7c.py')

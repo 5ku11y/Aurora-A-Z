@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import subprocess
 import sys
 
 if len(sys.argv) != 3:
@@ -118,4 +119,11 @@ if present_token in main_slice[main_key:main_play]:
     raise SystemExit('V7M legacy target-position page is still presented')
 
 out.write_text(src)
-print(f"generated {out} with V7M persistent loader and fast MOV track open")
+
+# V7N layers the final viewer-facing timed Spelunkr TV loader and safe schedule
+# connection reuse on top of this validated V7M fast-track source.
+v7n = Path(__file__).with_name('patch_v7n.py')
+tmp_n = out.with_name(out.name + '.v7n')
+subprocess.run([sys.executable, str(v7n), str(out), str(tmp_n)], check=True)
+tmp_n.replace(out)
+print(f"generated {out} through V7N Spelunkr TV timed-loader fast-open playback")

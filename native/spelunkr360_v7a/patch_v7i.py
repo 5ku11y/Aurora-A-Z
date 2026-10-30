@@ -9,7 +9,7 @@ src = Path(sys.argv[1]).read_text()
 out = Path(sys.argv[2])
 
 # V7I: turn the hardware-proven V7H 60-second soak into real continuous
-# playback.  Do NOT change the transport, decoder, audio-master clock, or
+# playback. Do NOT change the transport, decoder, audio-master clock, or
 # progressive prefetch behavior that just passed on real Xbox 360 hardware.
 # Remove only the synthetic test stop and the packet-count ceiling so playback
 # runs until the user exits or the current media source genuinely reaches EOF.
@@ -38,6 +38,14 @@ if old_stop not in src:
     raise SystemExit('V7I 60-second auto-stop marker missing')
 src = src.replace(old_stop, '', 1)
 
+# Removing the only goto to this V7D/V7H soak label makes it obsolete. Keep the
+# cleanup/result code in place, but let normal loop exit fall straight into it.
+old_label = '\nstopped:\n    if (range_http != NULL) *range_http = remote.last_http;\n'
+new_label = '\n    if (range_http != NULL) *range_http = remote.last_http;\n'
+if old_label not in src:
+    raise SystemExit('V7I stopped-label marker missing')
+src = src.replace(old_label, new_label, 1)
+
 src = src.replace('| RANGE HTTP %ld | SOAK 60s\\n',
                   '| RANGE HTTP %ld | CONTINUOUS\\n')
 src = src.replace('LONG-RUN STABILITY TEST: PASS', 'CONTINUOUS PLAYBACK TEST: PASS')
@@ -62,6 +70,8 @@ if 'if (audio_clock >= audio.first_media_ms + V7C_PLAY_MS) goto stopped;' in src
     raise SystemExit('V7I synthetic 60-second stop survived')
 if 'packets++ < V7C_MAX_PACKETS' in src:
     raise SystemExit('V7I packet-count ceiling survived')
+if '\nstopped:\n' in src:
+    raise SystemExit('V7I obsolete stopped label survived')
 
 out.write_text(src)
 print(f"generated {out} with V7I true continuous playback until user exit or source EOF")

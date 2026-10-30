@@ -53,13 +53,11 @@ if old_bg_watchdog not in src:
 src = src.replace(old_bg_watchdog, new_bg_watchdog, 1)
 
 # Synchronous fallback must not reintroduce the old 15-second common-curl stall.
-# Match remote_fill's reset sequence so remote_open / metadata requests retain
-# their existing conservative timeout behavior.
-old_fg = '''    curl_easy_reset(remote->curl);
-    set_common_curl(remote->curl, remote->url);
+# Match only the stable option pair; earlier patch layers can rewrite nearby
+# remote_fill code while these two lines remain intact.
+old_fg = '''    set_common_curl(remote->curl, remote->url);
     curl_easy_setopt(remote->curl, CURLOPT_RANGE, range);'''
-new_fg = '''    curl_easy_reset(remote->curl);
-    set_common_curl(remote->curl, remote->url);
+new_fg = '''    set_common_curl(remote->curl, remote->url);
     curl_easy_setopt(remote->curl, CURLOPT_LOW_SPEED_TIME, 3L);
     curl_easy_setopt(remote->curl, CURLOPT_RANGE, range);'''
 if old_fg not in src:

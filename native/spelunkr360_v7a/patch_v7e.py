@@ -9,9 +9,9 @@ src = Path(sys.argv[1]).read_text()
 out = Path(sys.argv[2])
 
 # V7E: eliminate the long synchronous Archive.org range-refill pause seen by
-# V7D hardware.  Keep the proven decoder/audio-master path, but prefetch the
+# V7D hardware. Keep the proven decoder/audio-master path, but prefetch the
 # next sequential media range on a second xsdk pthread while the current cache
-# is being consumed.  At the cache boundary playback swaps buffers instead of
+# is being consumed. At the cache boundary playback swaps buffers instead of
 # starting a fresh blocking HTTPS request.
 
 if '#include <pthread.h>' not in src:
@@ -26,8 +26,30 @@ src = src.replace('V7D - B/BACK/START RETURNS TO AURORA',
 src = src.replace('V7D soak failed:', 'V7E soak failed:')
 src = src.replace('Spelunkr360 V7D PASS:', 'Spelunkr360 V7E PASS:')
 
-old_struct_tail = '''    char curl_error[CURL_ERROR_SIZE];\n    char error[256];\n};'''
-new_struct_tail = '''    char curl_error[CURL_ERROR_SIZE];\n    char error[256];\n\n    /* V7E sequential double buffer.  The worker owns prefetch_cache while\n     * prefetch_active is true; the playback thread only consumes cache. */\n    uint8_t *prefetch_cache;\n    size_t prefetch_capacity;\n    size_t prefetch_length;\n    int64_t prefetch_start;\n    pthread_t prefetch_thread;\n    bool prefetch_active;\n    bool prefetch_enabled;\n    volatile bool prefetch_done;\n    int prefetch_status;\n    long prefetch_http;\n    unsigned prefetch_started;\n    unsigned prefetch_hits;\n    unsigned prefetch_waits;\n    unsigned prefetch_fallbacks;\n    char prefetch_error[128];\n};'''
+old_struct_tail = '''    char curl_error[CURL_ERROR_SIZE];
+    char error[256];
+};'''
+new_struct_tail = '''    char curl_error[CURL_ERROR_SIZE];
+    char error[256];
+
+    /* V7E sequential double buffer. The worker owns prefetch_cache while
+     * prefetch_active is true; the playback thread only consumes cache. */
+    uint8_t *prefetch_cache;
+    size_t prefetch_capacity;
+    size_t prefetch_length;
+    int64_t prefetch_start;
+    pthread_t prefetch_thread;
+    bool prefetch_active;
+    bool prefetch_enabled;
+    volatile bool prefetch_done;
+    int prefetch_status;
+    long prefetch_http;
+    unsigned prefetch_started;
+    unsigned prefetch_hits;
+    unsigned prefetch_waits;
+    unsigned prefetch_fallbacks;
+    char prefetch_error[128];
+};'''
 if old_struct_tail not in src:
     raise SystemExit('V7E remote_file struct marker missing')
 src = src.replace(old_struct_tail, new_struct_tail, 1)
@@ -179,44 +201,91 @@ static int v7e_prefetch_promote(struct remote_file *remote, int64_t position)
 '''
 src = src.replace(remote_open_marker, helpers + remote_open_marker, 1)
 
-old_read_fill = '''        if (remote->cache_start < 0 || remote->position < remote->cache_start || remote->position >= cache_end) {\n            if (remote_fill(remote, remote->position) != 0)\n                return copied > 0 ? copied : AVERROR(EIO);\n            cache_end = remote->cache_start + (int64_t)remote->cache_length;\n        }'''
-new_read_fill = '''        if (remote->cache_start < 0 || remote->position < remote->cache_start || remote->position >= cache_end) {\n            int promoted = v7e_prefetch_promote(remote, remote->position);\n            if (promoted <= 0) {\n                if (promoted < 0) remote->prefetch_fallbacks++;\n                if (remote_fill(remote, remote->position) != 0)\n                    return copied > 0 ? copied : AVERROR(EIO);\n                (void)v7e_prefetch_start(remote);\n            }\n            cache_end = remote->cache_start + (int64_t)remote->cache_length;\n        }'''
+old_read_fill = '''        if (remote->cache_start < 0 || remote->position < remote->cache_start || remote->position >= cache_end) {
+            if (remote_fill(remote, remote->position) != 0)
+                return copied > 0 ? copied : AVERROR(EIO);
+            cache_end = remote->cache_start + (int64_t)remote->cache_length;
+        }'''
+new_read_fill = '''        if (remote->cache_start < 0 || remote->position < remote->cache_start || remote->position >= cache_end) {
+            int promoted = v7e_prefetch_promote(remote, remote->position);
+            if (promoted <= 0) {
+                if (promoted < 0) remote->prefetch_fallbacks++;
+                if (remote_fill(remote, remote->position) != 0)
+                    return copied > 0 ? copied : AVERROR(EIO);
+                (void)v7e_prefetch_start(remote);
+            }
+            cache_end = remote->cache_start + (int64_t)remote->cache_length;
+        }'''
 if old_read_fill not in src:
     raise SystemExit('V7E avio refill marker missing')
 src = src.replace(old_read_fill, new_read_fill, 1)
 
-old_close = '''static void remote_close(struct remote_file *remote)\n{\n    if (remote == NULL) return;\n    if (remote->curl != NULL) curl_easy_cleanup(remote->curl);\n    free(remote->cache);\n    memset(remote, 0, sizeof(*remote));\n}'''
-new_close = '''static void remote_close(struct remote_file *remote)\n{\n    if (remote == NULL) return;\n    if (remote->prefetch_active) {\n        (void)pthread_join(remote->prefetch_thread, NULL);\n        remote->prefetch_active = false;\n    }\n    if (remote->curl != NULL) curl_easy_cleanup(remote->curl);\n    free(remote->prefetch_cache);\n    free(remote->cache);\n    memset(remote, 0, sizeof(*remote));\n}'''
+old_close = '''static void remote_close(struct remote_file *remote)
+{
+    if (remote == NULL) return;
+    if (remote->curl != NULL) curl_easy_cleanup(remote->curl);
+    free(remote->cache);
+    memset(remote, 0, sizeof(*remote));
+}'''
+new_close = '''static void remote_close(struct remote_file *remote)
+{
+    if (remote == NULL) return;
+    if (remote->prefetch_active) {
+        (void)pthread_join(remote->prefetch_thread, NULL);
+        remote->prefetch_active = false;
+    }
+    if (remote->curl != NULL) curl_easy_cleanup(remote->curl);
+    free(remote->prefetch_cache);
+    free(remote->cache);
+    memset(remote, 0, sizeof(*remote));
+}'''
 if old_close not in src:
     raise SystemExit('V7E remote_close marker missing')
 src = src.replace(old_close, new_close, 1)
 
-old_seek_ready = '''    avcodec_flush_buffers(video_decoder);\n    avcodec_flush_buffers(audio_decoder);\n    format_hms(target_ms, target_text, sizeof(target_text));'''
-new_seek_ready = '''    avcodec_flush_buffers(video_decoder);\n    avcodec_flush_buffers(audio_decoder);\n    /* The seek has synchronously filled the current 4 MiB media window.\n     * Start the following window now so HTTPS runs in parallel with decode. */\n    remote.prefetch_enabled = true;\n    if (v7e_prefetch_start(&remote) != 0)\n        xsdk_log_write("V7E prefetch start failed; synchronous fallback remains available");\n    format_hms(target_ms, target_text, sizeof(target_text));'''
+old_seek_ready = '''    avcodec_flush_buffers(video_decoder);
+    avcodec_flush_buffers(audio_decoder);
+    format_hms(target_ms, target_text, sizeof(target_text));'''
+new_seek_ready = '''    avcodec_flush_buffers(video_decoder);
+    avcodec_flush_buffers(audio_decoder);
+    /* The seek has synchronously filled the current 4 MiB media window.
+     * Start the following window now so HTTPS runs in parallel with decode. */
+    remote.prefetch_enabled = true;
+    if (v7e_prefetch_start(&remote) != 0)
+        xsdk_log_write("V7E prefetch start failed; synchronous fallback remains available");
+    format_hms(target_ms, target_text, sizeof(target_text));'''
 if old_seek_ready not in src:
     raise SystemExit('V7E post-seek marker missing')
 src = src.replace(old_seek_ready, new_seek_ready, 1)
 
-old_overlay = (
-    '                    "AUDIO %s %dHz %dch | PLAYED %u SILENT %u | RANGE HTTP %ld | SOAK 60s\\n"\\n'
-    '                    "B/BACK/START: RETURN TO AURORA",'
-)
-new_overlay = (
-    '                    "AUDIO %s %dHz %dch | PLAYED %u SILENT %u | RANGE HTTP %ld | SOAK 60s\\n"\\n'
-    '                    "PREFETCH HIT %u WAIT %u START %u FALLBACK %u\\n"\\n'
-    '                    "B/BACK/START: RETURN TO AURORA",'
-)
+# Insert the transport counters immediately before the existing exit-help line.
+# Matching that single stable C string is less brittle than duplicating the
+# entire V7D overlay format across patch layers.
+old_overlay = '                    "B/BACK/START: RETURN TO AURORA",'
+new_overlay = ('                    "PREFETCH HIT %u WAIT %u START %u FALLBACK %u\\n"\n'
+               '                    "B/BACK/START: RETURN TO AURORA",')
 if old_overlay not in src:
     raise SystemExit('V7E overlay format marker missing')
 src = src.replace(old_overlay, new_overlay, 1)
 old_overlay_args = '''                    audio_stats.played, audio_stats.silent, remote.last_http);'''
-new_overlay_args = '''                    audio_stats.played, audio_stats.silent, remote.last_http,\n                    remote.prefetch_hits, remote.prefetch_waits, remote.prefetch_started, remote.prefetch_fallbacks);'''
+new_overlay_args = '''                    audio_stats.played, audio_stats.silent, remote.last_http,
+                    remote.prefetch_hits, remote.prefetch_waits, remote.prefetch_started, remote.prefetch_fallbacks);'''
 if old_overlay_args not in src:
     raise SystemExit('V7E overlay args marker missing')
 src = src.replace(old_overlay_args, new_overlay_args, 1)
 
-old_fail = '''        snprintf(error, error_size,\n            "V7E soak failed: video=%u drop=%u/%u vspan=%" PRId64\n            " audio=%u silent_delta=%u aspan=%" PRId64 " max_sync=%" PRId64 "ms HTTP=%ld",\n            rendered_frames, dropped_frames, drop_limit, video_span,\n            audio_stats.played, silent_delta, audio_span, max_abs_sync_ms, remote.last_http);'''
-new_fail = '''        snprintf(error, error_size,\n            "V7E soak failed\\nVIDEO %u DROP %u/%u VSPAN %" PRId64 "ms\\n"\n            "AUDIO %u SILENT+%u ASPAN %" PRId64 "ms\\n"\n            "SYNCMAX %" PRId64 "ms HTTP %ld\\nPF HIT %u WAIT %u START %u FALLBACK %u",\n            rendered_frames, dropped_frames, drop_limit, video_span,\n            audio_stats.played, silent_delta, audio_span, max_abs_sync_ms, remote.last_http,\n            remote.prefetch_hits, remote.prefetch_waits, remote.prefetch_started, remote.prefetch_fallbacks);'''
+old_fail = '''        snprintf(error, error_size,
+            "V7E soak failed: video=%u drop=%u/%u vspan=%" PRId64
+            " audio=%u silent_delta=%u aspan=%" PRId64 " max_sync=%" PRId64 "ms HTTP=%ld",
+            rendered_frames, dropped_frames, drop_limit, video_span,
+            audio_stats.played, silent_delta, audio_span, max_abs_sync_ms, remote.last_http);'''
+new_fail = '''        snprintf(error, error_size,
+            "V7E soak failed\\nVIDEO %u DROP %u/%u VSPAN %" PRId64 "ms\\n"
+            "AUDIO %u SILENT+%u ASPAN %" PRId64 "ms\\n"
+            "SYNCMAX %" PRId64 "ms HTTP %ld\\nPF HIT %u WAIT %u START %u FALLBACK %u",
+            rendered_frames, dropped_frames, drop_limit, video_span,
+            audio_stats.played, silent_delta, audio_span, max_abs_sync_ms, remote.last_http,
+            remote.prefetch_hits, remote.prefetch_waits, remote.prefetch_started, remote.prefetch_fallbacks);'''
 if old_fail not in src:
     raise SystemExit('V7E fail diagnostic marker missing')
 src = src.replace(old_fail, new_fail, 1)

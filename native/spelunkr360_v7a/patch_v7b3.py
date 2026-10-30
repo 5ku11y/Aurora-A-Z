@@ -33,7 +33,7 @@ if old_range not in src:
 src = src.replace(old_range, new_range, 1)
 
 old_seek_done = '''    result = av_seek_frame(format, video_index, target_ts, AVSEEK_FLAG_BACKWARD);\n    if (result < 0) {\n        ff_error_text(result, fferr, sizeof(fferr));\n        snprintf(error, error_size, "V7B media seek failed: %s", fferr);\n        goto fail;\n    }\n    avcodec_flush_buffers(decoder);\n'''
-new_seek_done = '''    result = av_seek_frame(format, video_index, target_ts, AVSEEK_FLAG_BACKWARD);\n    if (result < 0) {\n        ff_error_text(result, fferr, sizeof(fferr));\n        snprintf(error, error_size, "V7B.3 media seek failed: %s remote=%.100s", fferr, remote.error);\n        goto fail;\n    }\n    /* A failed/short custom-AVIO probe during seek can leave EOF/error latched\n     * even when mov seek itself succeeds.  Reset them before the first packet. */\n    avio->eof_reached = 0;\n    avio->error = 0;\n    avcodec_flush_buffers(decoder);\n'''
+new_seek_done = '''    result = av_seek_frame(format, video_index, target_ts, AVSEEK_FLAG_BACKWARD);\n    if (result < 0) {\n        ff_error_text(result, fferr, sizeof(fferr));\n        snprintf(error, error_size, "V7B.3 media seek failed: %s remote=%.100s", fferr, remote.error);\n        goto fail;\n    }\n    /* A failed/short custom-AVIO probe during seek can leave EOF/error latched\n     * even when mov seek itself succeeds. Reset them before the first packet. */\n    avio->eof_reached = 0;\n    avio->error = 0;\n    avcodec_flush_buffers(decoder);\n'''
 if old_seek_done not in src:
     raise SystemExit('V7B.3 seek completion marker missing')
 src = src.replace(old_seek_done, new_seek_done, 1)
@@ -66,9 +66,7 @@ if helper_start >= 0 and play_start > helper_start:
 else:
     raise SystemExit('V7C could not locate obsolete V7B timing helpers')
 
-# Layer the hardware-proven playback stack through V7J.  V7K adds fast exit
-# and the first cleanup pass; V7L then removes the historical forced front-moov
-# preload and installs the real Wolf Factory loading screen.
+# Layer the hardware-proven playback stack through V7M.
 out.write_text(src)
 v7c = Path(__file__).with_name('patch_v7c.py')
 v7d = Path(__file__).with_name('patch_v7d.py')
@@ -80,6 +78,7 @@ v7i = Path(__file__).with_name('patch_v7i.py')
 v7j = Path(__file__).with_name('patch_v7j.py')
 v7k = Path(__file__).with_name('patch_v7k.py')
 v7l = Path(__file__).with_name('patch_v7l.py')
+v7m = Path(__file__).with_name('patch_v7m.py')
 tmp_c = out.with_name(out.name + '.v7c')
 tmp_d = out.with_name(out.name + '.v7d')
 tmp_e = out.with_name(out.name + '.v7e')
@@ -90,6 +89,7 @@ tmp_i = out.with_name(out.name + '.v7i')
 tmp_j = out.with_name(out.name + '.v7j')
 tmp_k = out.with_name(out.name + '.v7k')
 tmp_l = out.with_name(out.name + '.v7l')
+tmp_m = out.with_name(out.name + '.v7m')
 subprocess.run([sys.executable, str(v7c), str(out), str(tmp_c)], check=True)
 subprocess.run([sys.executable, str(v7d), str(tmp_c), str(tmp_d)], check=True)
 subprocess.run([sys.executable, str(v7e), str(tmp_d), str(tmp_e)], check=True)
@@ -100,8 +100,9 @@ subprocess.run([sys.executable, str(v7i), str(tmp_h), str(tmp_i)], check=True)
 subprocess.run([sys.executable, str(v7j), str(tmp_i), str(tmp_j)], check=True)
 subprocess.run([sys.executable, str(v7k), str(tmp_j), str(tmp_k)], check=True)
 subprocess.run([sys.executable, str(v7l), str(tmp_k), str(tmp_l)], check=True)
-tmp_l.replace(out)
-for tmp in (tmp_c, tmp_d, tmp_e, tmp_f, tmp_g, tmp_h, tmp_i, tmp_j, tmp_k):
+subprocess.run([sys.executable, str(v7m), str(tmp_l), str(tmp_m)], check=True)
+tmp_m.replace(out)
+for tmp in (tmp_c, tmp_d, tmp_e, tmp_f, tmp_g, tmp_h, tmp_i, tmp_j, tmp_k, tmp_l):
     if tmp.exists():
         tmp.unlink()
-print(f"generated {out} through V7L demand-open real-loader playback")
+print(f"generated {out} through V7M persistent-loader fast-track playback")

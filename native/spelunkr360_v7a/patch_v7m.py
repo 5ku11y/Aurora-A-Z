@@ -33,19 +33,21 @@ src = src.replace('V7L foreground partial salvaged', 'V7M foreground partial sal
 src = src.replace('V7L prefetch thread: creator_ht=', 'V7M prefetch thread: creator_ht=')
 
 # Remove the old main() diagnostic/status page that V7L hardware showed after
-# roughly three seconds. It sits immediately before the stage10 decode call and
-# is the source of the NOW PLAYING / TARGET POSITION / ARCHIVE ID screen.
+# roughly three seconds. Locate the target-position format string and delete the
+# whole status block up to the real decode_picture() call. V7L already sets the
+# loader dimensions near the beginning of main(), so any duplicate stage-width
+# assignments inside this legacy block are no longer needed.
 status_key = '"NOW PLAYING: %s\\nTARGET POSITION: %s\\nARCHIVE ID: %s\\n\\n"'
 key_at = src.find(status_key)
 if key_at < 0:
     raise SystemExit('V7M legacy target-position text marker missing')
 status_begin = src.rfind('    snprintf(status_text, sizeof(status_text),', 0, key_at)
-decode_setup = src.find('    g_stage_width = width;\n    g_stage_height = height;\n    if (decode_picture(', key_at)
-if status_begin < 0 or decode_setup <= status_begin:
+decode_call = src.find('    if (decode_picture(', key_at)
+if status_begin < 0 or decode_call <= status_begin:
     raise SystemExit('V7M legacy status-page boundaries missing')
 src = (src[:status_begin] +
        '    v7_stage("PROGRAM LOCATED - OPENING LIVE VIDEO...");\n\n' +
-       src[decode_setup:])
+       src[decode_call:])
 
 # The MOV demuxer is already forced. The generic stream-info scan is therefore
 # unnecessary for this known H.264/AAC MP4 path and may perform several extra

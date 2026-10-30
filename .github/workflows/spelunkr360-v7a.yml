@@ -1,4 +1,4 @@
-name: Spelunkr360 V7J keepalive continuous playback probe
+name: Spelunkr360 V7J fast-rollover continuous playback probe
 
 on:
   push:
@@ -159,7 +159,7 @@ jobs:
           path: ${{ env.FFMPEG_PREFIX }}
           key: ${{ env.FFMPEG_CACHE }}
 
-      - name: Build Spelunkr360 V7J keepalive continuous playback probe
+      - name: Build Spelunkr360 V7J fast-rollover continuous playback probe
         run: |
           set -euo pipefail
           GLSLANG="$(command -v glslangValidator)"
@@ -220,13 +220,11 @@ jobs:
               raise SystemExit('V7J dashboard title resource is invalid')
           for marker in (
               b'Spelunkr360', b'SPELUNKR360 V7A.10', b'ca.pem',
-              b'SPELUNKR360 V7J - KEEPALIVE CONTINUOUS PLAYBACK',
-              b'KEEPALIVE RANGE STREAMING ENABLED',
+              b'SPELUNKR360 V7J - FAST-ROLLOVER CONTINUOUS PLAYBACK',
               b'CONTINUOUS PLAYBACK TEST: PASS',
               b'H.264 + AAC CONTINUOUS PLAYBACK STABLE',
               b'NEXT MILESTONE: FINAL INTEGRATION + DISPLAY POLISH',
-              b'PF H', b'STR H', b'CONTINUOUS', b'KA%u',
-              b'V7J range complete:',
+              b'PF H', b'STR H', b'CONTINUOUS', b'PF 8MB / 2s ROLLOVER',
               b'V7J continuous playback ended before stability gate',
               b'V7J async partial salvaged', b'V7J foreground partial salvaged',
               b'V7J prefetch thread: creator_ht=', b'V7C xsdk_audio_open failed'):

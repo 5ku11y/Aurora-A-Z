@@ -9,15 +9,14 @@ src = Path(sys.argv[1]).read_text()
 out = Path(sys.argv[2])
 
 # V7M hardware follow-up after V7L:
-# - V7L's real loader appeared, but an old V7A success/status page immediately
-#   overwrote it with NOW PLAYING / TARGET POSITION / ARCHIVE ID while the slow
-#   media-open path was still running.
-# - keep the Wolf Factory loader in control from launch until first video frame.
-# - bypass avformat_find_stream_info(). We force the MOV demuxer and MOV creates
-#   its stream/codecpar entries while parsing the MP4 track table during open;
-#   the generic discovery scan is redundant here and can trigger extra blocking
-#   custom-AVIO range reads on Xbox 360.
-# - preserve V7J/V7L's proven decoder/audio/8 MiB playback prefetch path.
+# - V7L's real loader appeared, but the legacy V7A main() status page then
+#   overwrote it with NOW PLAYING / TARGET POSITION / ARCHIVE ID.
+# - keep the Wolf Factory loader in control until the continuous player renders
+#   the first actual video frame.
+# - bypass avformat_find_stream_info() only inside play_video_continuous(). The
+#   MOV demuxer is forced and populates MP4 track codecpar during open; the
+#   generic discovery scan can cause extra blocking custom-AVIO range reads.
+# - preserve V7J/V7L decoder, AAC, live-seek and 8 MiB playback prefetch logic.
 
 src = src.replace(
     'SPELUNKR360 V7L - DEMAND OPEN + REAL LOADER',
@@ -32,57 +31,62 @@ src = src.replace('V7L async partial salvaged', 'V7M async partial salvaged')
 src = src.replace('V7L foreground partial salvaged', 'V7M foreground partial salvaged')
 src = src.replace('V7L prefetch thread: creator_ht=', 'V7M prefetch thread: creator_ht=')
 
-# Remove the old main() diagnostic/status page that V7L hardware showed after
-# roughly three seconds. V7B replaced decode_picture() in main() with the
-# hardware-proven play_video_continuous() call, so use that actual handoff as
-# the end boundary. Match semantic tokens only; whitespace is not stable.
+# Scope the viewer-facing fix explicitly to main(). Do not delete the legacy
+# snprintf itself: keeping it avoids turning old diagnostic variables into
+# -Werror unused-variable failures. We simply prevent that text buffer from ever
+# being presented and draw the branded loader instead.
 status_key = '"NOW PLAYING: %s\\nTARGET POSITION: %s\\nARCHIVE ID: %s\\n\\n"'
-key_at = src.find(status_key)
+main_at = src.find('int main(void)')
+if main_at < 0:
+    raise SystemExit('V7M main marker missing')
+key_at = src.find(status_key, main_at)
 if key_at < 0:
-    raise SystemExit('V7M legacy target-position text marker missing')
-snprintf_at = src.rfind('snprintf(status_text', 0, key_at)
-play_at = src.find('play_video_continuous(', key_at)
-if snprintf_at < 0 or play_at <= snprintf_at:
-    raise SystemExit('V7M legacy status-page semantic boundaries missing')
-status_begin = src.rfind('\n', 0, snprintf_at) + 1
-play_line = src.rfind('\n', 0, play_at) + 1
-if play_line <= status_begin:
-    raise SystemExit('V7M legacy status-page line boundaries missing')
-src = (src[:status_begin] +
-       '    v7_stage("PROGRAM LOCATED - OPENING LIVE VIDEO...");\n\n' +
-       src[play_line:])
+    raise SystemExit('V7M main target-position text marker missing')
+play_call = src.find('play_video_continuous(', key_at)
+if play_call < 0:
+    raise SystemExit('V7M main continuous-player handoff missing')
+present_token = '(void)present_status(width, height, status_text, GOOD_ARGB);'
+present_at = src.find(present_token, key_at, play_call)
+if present_at < 0:
+    raise SystemExit('V7M legacy main status presenter missing')
+src = (src[:present_at] +
+       'v7_stage("PROGRAM LOCATED - OPENING LIVE VIDEO...");' +
+       src[present_at + len(present_token):])
 
-# The MOV demuxer is already forced. The generic stream-info scan is therefore
-# unnecessary for this known H.264/AAC MP4 path and may perform several extra
-# synchronous AVIO reads before av_find_best_stream. Again use semantic tokens
-# instead of exact formatting so this remains stable across generated layers.
-scan_at = src.find('avformat_find_stream_info(format, NULL)')
-video_at = src.find('video_index = av_find_best_stream', scan_at)
+# Scope the startup experiment explicitly to the hardware-proven continuous
+# playback function. The older unused decode_picture() helper is intentionally
+# left alone; it is not the path Wolf is running on hardware.
+play_def = src.find('static int play_video_continuous(')
+main_at = src.find('int main(void)', play_def)
+if play_def < 0 or main_at <= play_def:
+    raise SystemExit('V7M continuous-player function boundaries missing')
+scan_at = src.find('avformat_find_stream_info(format, NULL)', play_def, main_at)
+video_at = src.find('video_index = av_find_best_stream', scan_at, main_at)
 if scan_at < 0 or video_at <= scan_at:
-    raise SystemExit('V7M stream-info semantic boundaries missing')
-scan_stage_at = src.rfind('v7_stage(', 0, scan_at)
-scan_begin = src.rfind('\n', 0, scan_stage_at if scan_stage_at >= 0 else scan_at) + 1
-video_line = src.rfind('\n', 0, video_at) + 1
+    raise SystemExit('V7M continuous stream-info boundaries missing')
+scan_stage_at = src.rfind('v7_stage(', play_def, scan_at)
+scan_begin = src.rfind('\n', play_def, scan_stage_at if scan_stage_at >= 0 else scan_at) + 1
+video_line = src.rfind('\n', scan_at, video_at) + 1
 if video_line <= scan_begin:
-    raise SystemExit('V7M stream-info line boundaries missing')
+    raise SystemExit('V7M continuous stream-info line boundaries missing')
 scan_replacement = '''    v7_stage("READING MP4 TRACK TABLE...");
     xsdk_log_write("V7M fast track open: avformat_find_stream_info bypassed");
 '''
 src = src[:scan_begin] + scan_replacement + src[video_line:]
 
-# Make the new stage map display a meaningful percentage instead of falling
-# back to the generic 10% value.
+# Give the new loader stages meaningful progress values.
 percent_marker = '    if (strstr(stage, "READING STREAM INFORMATION") != NULL) return 62;\n'
 if percent_marker not in src:
     raise SystemExit('V7M loader percentage marker missing')
 src = src.replace(
     percent_marker,
-    percent_marker + '    if (strstr(stage, "READING MP4 TRACK TABLE") != NULL) return 62;\n'
+    percent_marker +
+    '    if (strstr(stage, "READING MP4 TRACK TABLE") != NULL) return 62;\n'
     '    if (strstr(stage, "PROGRAM LOCATED - OPENING LIVE VIDEO") != NULL) return 28;\n',
     1
 )
 
-# Hardware-visible proof marker in the playback overlay.
+# Hardware-visible proof marker once playback starts.
 src = src.replace('| RANGE HTTP %ld | CONTINUOUS | PF 8MB / 2s | V7L DEMAND OPEN\\n',
                   '| RANGE HTTP %ld | CONTINUOUS | PF 8MB / 2s | V7M FAST TRACK\\n', 1)
 
@@ -97,11 +101,19 @@ for needle in (
     if needle not in src:
         raise SystemExit(f'V7M marker missing: {needle}')
 
-# Ensure the legacy viewer-facing page and generic scan really are gone.
-if status_key in src:
-    raise SystemExit('V7M legacy target-position loading page survived')
-if 'avformat_find_stream_info(format, NULL)' in src:
-    raise SystemExit('V7M generic stream-info scan survived')
+# Verify the actual paths, not obsolete helper copies.
+play_def = src.find('static int play_video_continuous(')
+main_at = src.find('int main(void)', play_def)
+play_slice = src[play_def:main_at]
+main_slice = src[main_at:]
+if 'avformat_find_stream_info(format, NULL)' in play_slice:
+    raise SystemExit('V7M generic stream-info scan survived in continuous player')
+main_key = main_slice.find(status_key)
+main_play = main_slice.find('play_video_continuous(', main_key)
+if main_key < 0 or main_play < 0:
+    raise SystemExit('V7M main verification boundaries missing')
+if present_token in main_slice[main_key:main_play]:
+    raise SystemExit('V7M legacy target-position page is still presented')
 
 out.write_text(src)
 print(f"generated {out} with V7M persistent loader and fast MOV track open")

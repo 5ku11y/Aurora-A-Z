@@ -33,35 +33,41 @@ src = src.replace('V7L foreground partial salvaged', 'V7M foreground partial sal
 src = src.replace('V7L prefetch thread: creator_ht=', 'V7M prefetch thread: creator_ht=')
 
 # Remove the old main() diagnostic/status page that V7L hardware showed after
-# roughly three seconds. Locate the target-position format string and delete the
-# whole status block up to the real decode_picture() call. V7L already sets the
-# loader dimensions near the beginning of main(), so any duplicate stage-width
-# assignments inside this legacy block are no longer needed.
+# roughly three seconds. Match semantic tokens only: the generated source has
+# gone through many patch layers, so whitespace/indentation is not stable.
 status_key = '"NOW PLAYING: %s\\nTARGET POSITION: %s\\nARCHIVE ID: %s\\n\\n"'
 key_at = src.find(status_key)
 if key_at < 0:
     raise SystemExit('V7M legacy target-position text marker missing')
-status_begin = src.rfind('    snprintf(status_text, sizeof(status_text),', 0, key_at)
-decode_call = src.find('    if (decode_picture(', key_at)
-if status_begin < 0 or decode_call <= status_begin:
-    raise SystemExit('V7M legacy status-page boundaries missing')
+snprintf_at = src.rfind('snprintf(status_text', 0, key_at)
+decode_at = src.find('decode_picture(', key_at)
+if snprintf_at < 0 or decode_at <= snprintf_at:
+    raise SystemExit('V7M legacy status-page semantic boundaries missing')
+status_begin = src.rfind('\n', 0, snprintf_at) + 1
+decode_line = src.rfind('\n', 0, decode_at) + 1
+if decode_line <= status_begin:
+    raise SystemExit('V7M legacy status-page line boundaries missing')
 src = (src[:status_begin] +
        '    v7_stage("PROGRAM LOCATED - OPENING LIVE VIDEO...");\n\n' +
-       src[decode_call:])
+       src[decode_line:])
 
 # The MOV demuxer is already forced. The generic stream-info scan is therefore
 # unnecessary for this known H.264/AAC MP4 path and may perform several extra
-# synchronous AVIO reads before av_find_best_stream. Skip only that scan; leave
-# all stream selection, decoder creation, live seek, audio setup and playback
-# logic untouched.
-scan_begin = src.find('    v7_stage("READING STREAM INFORMATION...");\n    result = avformat_find_stream_info(format, NULL);')
-video_find = src.find('    video_index = av_find_best_stream(format, AVMEDIA_TYPE_VIDEO', scan_begin)
-if scan_begin < 0 or video_find <= scan_begin:
-    raise SystemExit('V7M stream-info scan boundaries missing')
+# synchronous AVIO reads before av_find_best_stream. Again use semantic tokens
+# instead of exact formatting so this remains stable across generated layers.
+scan_at = src.find('avformat_find_stream_info(format, NULL)')
+video_at = src.find('video_index = av_find_best_stream', scan_at)
+if scan_at < 0 or video_at <= scan_at:
+    raise SystemExit('V7M stream-info semantic boundaries missing')
+scan_stage_at = src.rfind('v7_stage(', 0, scan_at)
+scan_begin = src.rfind('\n', 0, scan_stage_at if scan_stage_at >= 0 else scan_at) + 1
+video_line = src.rfind('\n', 0, video_at) + 1
+if video_line <= scan_begin:
+    raise SystemExit('V7M stream-info line boundaries missing')
 scan_replacement = '''    v7_stage("READING MP4 TRACK TABLE...");
     xsdk_log_write("V7M fast track open: avformat_find_stream_info bypassed");
 '''
-src = src[:scan_begin] + scan_replacement + src[video_find:]
+src = src[:scan_begin] + scan_replacement + src[video_line:]
 
 # Make the new stage map display a meaningful percentage instead of falling
 # back to the generic 10% value.
@@ -90,9 +96,11 @@ for needle in (
     if needle not in src:
         raise SystemExit(f'V7M marker missing: {needle}')
 
-# Ensure the old viewer-facing target-position loading page is actually gone.
-if '"NOW PLAYING: %s\\nTARGET POSITION: %s\\nARCHIVE ID: %s\\n\\n"' in src:
+# Ensure the legacy viewer-facing page and generic scan really are gone.
+if status_key in src:
     raise SystemExit('V7M legacy target-position loading page survived')
+if 'avformat_find_stream_info(format, NULL)' in src:
+    raise SystemExit('V7M generic stream-info scan survived')
 
 out.write_text(src)
 print(f"generated {out} with V7M persistent loader and fast MOV track open")

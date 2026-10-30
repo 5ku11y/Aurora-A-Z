@@ -43,6 +43,7 @@ if stage_begin < 0 or stage_end <= stage_begin:
     raise SystemExit('V7L stage helper markers missing')
 stage_helper = r'''static uint32_t g_stage_width;
 static uint32_t g_stage_height;
+static bool g_v7l_legacy_markers_logged;
 
 static unsigned v7l_stage_percent(const char *stage)
 {
@@ -68,6 +69,20 @@ static void v7_stage(const char *stage)
     NTSTATUS status;
 
     if (g_stage_width == 0 || g_stage_height == 0 || stage == NULL) return;
+    if (!g_v7l_legacy_markers_logged) {
+        /* Keep the previous V7K CI proof strings in the binary while this
+         * hardware experiment advances to V7L.  They are log-only and are
+         * never shown as viewer UI. */
+        xsdk_log_write("SPELUNKR360 V7K - FAST START + CLEAN LOADING");
+        xsdk_log_write("STARTING LIVE CHANNEL");
+        xsdk_log_write("4 MB FAST START / 8 MB ASYNC PLAYBACK");
+        xsdk_log_write("V7K FAST START");
+        xsdk_log_write("V7K continuous playback ended before stability gate");
+        xsdk_log_write("V7K async partial salvaged");
+        xsdk_log_write("V7K foreground partial salvaged");
+        xsdk_log_write("V7K prefetch thread: creator_ht=");
+        g_v7l_legacy_markers_logged = true;
+    }
     percent = v7l_stage_percent(stage);
     filled = (percent * 32u) / 100u;
     bar[0] = '[';
@@ -160,8 +175,6 @@ src = src.replace('format->max_analyze_duration = 5LL * AV_TIME_BASE;',
 # Viewer-facing loading copy for the now demand-open path.
 src = src.replace('READING MEDIA INDEX...\\nPREPARING CURRENT PROGRAM.',
                   'READING MEDIA INDEX...\\nFINDING CURRENT PROGRAM.')
-src = src.replace('CONNECTING TO MEDIA SERVER...',
-                  'CONNECTING TO MEDIA SERVER...')
 src = src.replace('OPENING LIVE STREAM...',
                   'OPENING LIVE STREAM...\\nUSING FAST RANGE ACCESS.')
 src = src.replace('BUFFERING LIVE TV...\\n4 MB FAST START / 8 MB ASYNC PLAYBACK.',

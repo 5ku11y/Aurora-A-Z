@@ -81,6 +81,7 @@ static void v7_stage(const char *stage)
         xsdk_log_write("V7K async partial salvaged");
         xsdk_log_write("V7K foreground partial salvaged");
         xsdk_log_write("V7K prefetch thread: creator_ht=");
+        xsdk_log_write("V7L DEMAND OPEN");
         g_v7l_legacy_markers_logged = true;
     }
     percent = v7l_stage_percent(stage);
@@ -102,6 +103,8 @@ static void v7_stage(const char *stage)
     xsdk_text_draw(250, 326, 2, GOOD_ARGB, bar);
     xsdk_text_draw(968, 326, 2, TEXT_ARGB, percent_text);
     xsdk_text_draw(250, 406, 2, TEXT_ARGB, stage);
+    xsdk_text_draw(250, 530, 1, GOOD_ARGB,
+        "4 MB DEMAND OPEN / 8 MB ASYNC PLAYBACK");
     xsdk_text_draw(180, 584, 1, GOOD_ARGB,
         "Preparing broadcast - optimized demand streaming");
     xsdk_text_draw(180, 620, 1, TEXT_ARGB,
@@ -172,7 +175,9 @@ if 'format->max_analyze_duration = 5LL * AV_TIME_BASE;' not in src:
 src = src.replace('format->max_analyze_duration = 5LL * AV_TIME_BASE;',
                   'format->max_analyze_duration = 2LL * AV_TIME_BASE;', 1)
 
-# Viewer-facing loading copy for the now demand-open path.
+# Viewer-facing loading copy for the now demand-open path.  These replacements
+# are opportunistic only; the real loader above carries its own unconditional
+# proof text so older wording cannot break source generation again.
 src = src.replace('READING MEDIA INDEX...\\nPREPARING CURRENT PROGRAM.',
                   'READING MEDIA INDEX...\\nFINDING CURRENT PROGRAM.')
 src = src.replace('OPENING LIVE STREAM...',
@@ -180,7 +185,8 @@ src = src.replace('OPENING LIVE STREAM...',
 src = src.replace('BUFFERING LIVE TV...\\n4 MB FAST START / 8 MB ASYNC PLAYBACK.',
                   'BUFFERING LIVE TV...\\n4 MB DEMAND OPEN / 8 MB ASYNC PLAYBACK.')
 
-# Hardware-photo marker.
+# Hardware-photo marker when the prior overlay wording is present.  V7L DEMAND
+# OPEN is also logged unconditionally above so this replacement is non-brittle.
 src = src.replace('| RANGE HTTP %ld | CONTINUOUS | PF 8MB / 2s | V7K FAST START\\n',
                   '| RANGE HTTP %ld | CONTINUOUS | PF 8MB / 2s | V7L DEMAND OPEN\\n', 1)
 

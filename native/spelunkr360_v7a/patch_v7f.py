@@ -146,7 +146,7 @@ src = src.replace(old_fail_args, new_fail_args, 1)
 for needle in (
     'SPELUNKR360 V7F - TIMEOUT-RESILIENT PREFETCH + STABILITY',
     'SPELUNKR360 V7F - TIMEOUT-RESILIENT PREFETCH PLAYBACK',
-    'CURLE_OPERATION_TIMEDOUT && remote->prefetch_length > 0',
+    'result == CURLE_OK || result == CURLE_OPERATION_TIMEDOUT',
     'V7F async partial salvaged',
     'V7F foreground partial salvaged',
     'PF HIT %u WAIT %u FALL %u PART %u | FG PART %u',

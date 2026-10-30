@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import subprocess
 import sys
 
 if len(sys.argv) != 3:
@@ -55,5 +56,10 @@ for needle in (
     if needle not in src:
         raise SystemExit(f'V7B.3 marker missing: {needle}')
 
+# Write the hardware-proven V7B.3 intermediate, then layer V7C audio/A-V sync on top.
 out.write_text(src)
-print(f"generated {out} with V7B.3 4 MiB range fills, AVIO reset, and first-read diagnostics")
+v7c = Path(__file__).with_name('patch_v7c.py')
+tmp = out.with_name(out.name + '.v7c')
+subprocess.run([sys.executable, str(v7c), str(out), str(tmp)], check=True)
+tmp.replace(out)
+print(f"generated {out} with V7B.3 stream-safe video plus V7C AAC/audio-master sync")

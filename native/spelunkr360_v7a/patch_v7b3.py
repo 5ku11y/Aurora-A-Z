@@ -66,8 +66,9 @@ if helper_start >= 0 and play_start > helper_start:
 else:
     raise SystemExit('V7C could not locate obsolete V7B timing helpers')
 
-# Layer the hardware-proven playback stack through V7H, then V7I removes only
-# the artificial 60-second/packet-count test stops for true continuous playback.
+# Layer the hardware-proven playback stack through V7I, then V7J keeps true
+# continuous playback while reusing the Archive HTTPS connection and doubling
+# async range depth to reduce the rhythmic V7I boundary stalls.
 out.write_text(src)
 v7c = Path(__file__).with_name('patch_v7c.py')
 v7d = Path(__file__).with_name('patch_v7d.py')
@@ -76,6 +77,7 @@ v7f = Path(__file__).with_name('patch_v7f.py')
 v7g = Path(__file__).with_name('patch_v7g.py')
 v7h = Path(__file__).with_name('patch_v7h.py')
 v7i = Path(__file__).with_name('patch_v7i.py')
+v7j = Path(__file__).with_name('patch_v7j.py')
 tmp_c = out.with_name(out.name + '.v7c')
 tmp_d = out.with_name(out.name + '.v7d')
 tmp_e = out.with_name(out.name + '.v7e')
@@ -83,6 +85,7 @@ tmp_f = out.with_name(out.name + '.v7f')
 tmp_g = out.with_name(out.name + '.v7g')
 tmp_h = out.with_name(out.name + '.v7h')
 tmp_i = out.with_name(out.name + '.v7i')
+tmp_j = out.with_name(out.name + '.v7j')
 subprocess.run([sys.executable, str(v7c), str(out), str(tmp_c)], check=True)
 subprocess.run([sys.executable, str(v7d), str(tmp_c), str(tmp_d)], check=True)
 subprocess.run([sys.executable, str(v7e), str(tmp_d), str(tmp_e)], check=True)
@@ -90,8 +93,9 @@ subprocess.run([sys.executable, str(v7f), str(tmp_e), str(tmp_f)], check=True)
 subprocess.run([sys.executable, str(v7g), str(tmp_f), str(tmp_g)], check=True)
 subprocess.run([sys.executable, str(v7h), str(tmp_g), str(tmp_h)], check=True)
 subprocess.run([sys.executable, str(v7i), str(tmp_h), str(tmp_i)], check=True)
-tmp_i.replace(out)
-for tmp in (tmp_c, tmp_d, tmp_e, tmp_f, tmp_g, tmp_h):
+subprocess.run([sys.executable, str(v7j), str(tmp_i), str(tmp_j)], check=True)
+tmp_j.replace(out)
+for tmp in (tmp_c, tmp_d, tmp_e, tmp_f, tmp_g, tmp_h, tmp_i):
     if tmp.exists():
         tmp.unlink()
-print(f"generated {out} through V7I true continuous playback")
+print(f"generated {out} through V7J keepalive continuous playback")

@@ -66,16 +66,21 @@ if helper_start >= 0 and play_start > helper_start:
 else:
     raise SystemExit('V7C could not locate obsolete V7B timing helpers')
 
-# Write the hardware-proven V7B.3 intermediate, layer V7C audio/A-V sync on
-# top, then apply V7D's 60-second playback-quality/stability soak gates.
+# Write the hardware-proven V7B.3 intermediate, layer V7C audio/A-V sync,
+# V7D's 60-second soak gates, then V7E's asynchronous sequential range
+# prefetch transport and readable hardware diagnostics.
 out.write_text(src)
 v7c = Path(__file__).with_name('patch_v7c.py')
 v7d = Path(__file__).with_name('patch_v7d.py')
+v7e = Path(__file__).with_name('patch_v7e.py')
 tmp_c = out.with_name(out.name + '.v7c')
 tmp_d = out.with_name(out.name + '.v7d')
+tmp_e = out.with_name(out.name + '.v7e')
 subprocess.run([sys.executable, str(v7c), str(out), str(tmp_c)], check=True)
 subprocess.run([sys.executable, str(v7d), str(tmp_c), str(tmp_d)], check=True)
-tmp_d.replace(out)
-if tmp_c.exists():
-    tmp_c.unlink()
-print(f"generated {out} with V7B.3 stream-safe video + V7C A/V sync + V7D 60-second soak")
+subprocess.run([sys.executable, str(v7e), str(tmp_d), str(tmp_e)], check=True)
+tmp_e.replace(out)
+for tmp in (tmp_c, tmp_d):
+    if tmp.exists():
+        tmp.unlink()
+print(f"generated {out} with V7B.3 video + V7C A/V sync + V7D soak + V7E async prefetch")

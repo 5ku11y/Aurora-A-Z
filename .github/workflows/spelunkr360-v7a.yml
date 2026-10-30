@@ -1,4 +1,4 @@
-name: Spelunkr360 V7D long-run stability probe
+name: Spelunkr360 V7E async prefetch stability probe
 
 on:
   push:
@@ -159,7 +159,7 @@ jobs:
           path: ${{ env.FFMPEG_PREFIX }}
           key: ${{ env.FFMPEG_CACHE }}
 
-      - name: Build Spelunkr360 V7D long-run stability probe
+      - name: Build Spelunkr360 V7E async prefetch stability probe
         run: |
           set -euo pipefail
           GLSLANG="$(command -v glslangValidator)"
@@ -173,20 +173,20 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release
 
           set +e
-          cmake --build build/spelunkr360_v7a > /tmp/v7d-build.log 2>&1
+          cmake --build build/spelunkr360_v7a > /tmp/v7e-build.log 2>&1
           rc=$?
           set -e
           if [ "$rc" -ne 0 ]; then
-            echo '--- V7D BUILD TAIL ---'
-            tail -160 /tmp/v7d-build.log || true
-            echo '--- V7D COMPILE/LINK ERRORS ---'
-            grep -E 'FAILED:|fatal error:|error:|undefined reference|ld:' /tmp/v7d-build.log | tail -240 || true
+            echo '--- V7E BUILD TAIL ---'
+            tail -160 /tmp/v7e-build.log || true
+            echo '--- V7E COMPILE/LINK ERRORS ---'
+            grep -E 'FAILED:|fatal error:|error:|undefined reference|ld:' /tmp/v7e-build.log | tail -240 || true
             exit "$rc"
           fi
-          cp build/spelunkr360_v7a/Spelunkr360V7A.xex build/spelunkr360_v7a/V7D.xex
-          (cd build/spelunkr360_v7a && sha256sum V7D.xex > V7D.sha)
+          cp build/spelunkr360_v7a/Spelunkr360V7A.xex build/spelunkr360_v7a/V7E.xex
+          (cd build/spelunkr360_v7a && sha256sum V7E.xex > V7E.sha)
 
-      - name: Validate Spelunkr360 V7D package
+      - name: Validate Spelunkr360 V7E package
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -195,11 +195,11 @@ jobs:
           TITLE_ID = 0x53503601
           EXECUTION_ID_HEADER = 0x00040006
           RESOURCE_INFO_HEADER = 0x000002FF
-          p = Path('build/spelunkr360_v7a/V7D.xex')
+          p = Path('build/spelunkr360_v7a/V7E.xex')
           ca = Path('build/spelunkr360_v7a/ca.pem')
           data = p.read_bytes()
           if data[:4] != b'XEX2':
-              raise SystemExit('V7D is not XEX2')
+              raise SystemExit('V7E is not XEX2')
           count = struct.unpack_from('>I', data, 0x14)[0]
           headers = {}
           for index in range(count):
@@ -207,17 +207,17 @@ jobs:
               headers[header_id] = value
           execution_offset = headers.get(EXECUTION_ID_HEADER)
           if execution_offset is None:
-              raise SystemExit('V7D has no Execution ID')
+              raise SystemExit('V7E has no Execution ID')
           title_id = struct.unpack_from('>I', data, execution_offset + 12)[0]
           if title_id != TITLE_ID:
               raise SystemExit(f'wrong TitleID: {title_id:08X}')
           resource_offset = headers.get(RESOURCE_INFO_HEADER)
           if resource_offset is None:
-              raise SystemExit('V7D has no XEX resource-info header')
+              raise SystemExit('V7E has no XEX resource-info header')
           resource_name = data[resource_offset + 4:resource_offset + 12]
           resource_size = struct.unpack_from('>I', data, resource_offset + 16)[0]
           if resource_name != b'53503601' or resource_size == 0:
-              raise SystemExit('V7D dashboard title resource is invalid')
+              raise SystemExit('V7E dashboard title resource is invalid')
           for marker in (
               b'Spelunkr360', b'SPELUNKR360 V7A.10', b'LIVE VIDEO FRAME PROBE',
               b'DECODED ARCHIVE.ORG FRAME - PASS', b'VIDEO FRAME TEST: FAIL',
@@ -225,28 +225,29 @@ jobs:
               b'remote_prefetch_front_moov', b'MP4 OPEN:', b'SZ8 CR=', b'META H=',
               b'STAGE 1/5: DOWNLOADING 17 MB MP4 HEADER',
               b'STAGE 5/5: READING / DECODING H.264 FRAME',
-              b'SPELUNKR360 V7D - PLAYBACK QUALITY + LONG-RUN STABILITY',
-              b'SPELUNKR360 V7D - 60 SECOND STABILITY PLAYBACK',
+              b'SPELUNKR360 V7E - ASYNC PREFETCH + LONG-RUN STABILITY',
+              b'SPELUNKR360 V7E - ASYNC PREFETCH STABILITY PLAYBACK',
               b'LONG-RUN STABILITY TEST: PASS',
               b'60+ SECONDS H.264 + AAC PLAYED STABLY',
               b'NEXT MILESTONE: FINAL INTEGRATION + POLISH',
-              b'SOAK 60s', b'V7C xsdk_audio_open failed'):
+              b'PREFETCH HIT', b'V7E soak failed', b'SOAK 60s',
+              b'V7C xsdk_audio_open failed'):
               if marker not in data:
                   raise SystemExit(f'missing marker {marker!r}')
           if b'cacert.pem' in data:
               raise SystemExit('legacy cacert.pem filename survived in XEX')
           if not ca.is_file() or ca.stat().st_size < 100000:
               raise SystemExit('ca.pem missing or unexpectedly small')
-          print(f'validated V7D {p} ({p.stat().st_size} bytes), TitleID={title_id:08X}, CA={ca.stat().st_size} bytes')
+          print(f'validated V7E {p} ({p.stat().st_size} bytes), TitleID={title_id:08X}, CA={ca.stat().st_size} bytes')
           PY
 
-      - name: Upload Spelunkr360 V7D
+      - name: Upload Spelunkr360 V7E
         uses: actions/upload-artifact@v4
         with:
-          name: V7D-${{ github.sha }}
+          name: V7E-${{ github.sha }}
           if-no-files-found: error
           retention-days: 14
           path: |
-            build/spelunkr360_v7a/V7D.xex
-            build/spelunkr360_v7a/V7D.sha
+            build/spelunkr360_v7a/V7E.xex
+            build/spelunkr360_v7a/V7E.sha
             build/spelunkr360_v7a/ca.pem

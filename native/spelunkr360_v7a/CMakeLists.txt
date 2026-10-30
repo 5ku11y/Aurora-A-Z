@@ -44,6 +44,7 @@ set(V7A_RETRY12_MAIN "${CMAKE_CURRENT_BINARY_DIR}/main_retry12.c")
 set(V7A_OPEN13_MAIN "${CMAKE_CURRENT_BINARY_DIR}/main_open13.c")
 set(V7B_MAIN "${CMAKE_CURRENT_BINARY_DIR}/main_v7b.c")
 set(V7B1_MAIN "${CMAKE_CURRENT_BINARY_DIR}/main_v7b1.c")
+set(V7B2_MAIN "${CMAKE_CURRENT_BINARY_DIR}/main_v7b2.c")
 
 execute_process(
   COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/patch_range_open.py"
@@ -177,8 +178,20 @@ if(NOT V7B1_PATCH_RESULT EQUAL 0)
 endif()
 message(STATUS "${V7B1_PATCH_STDOUT}")
 
+execute_process(
+  COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/patch_v7b2.py"
+          "${V7B1_MAIN}" "${V7B2_MAIN}"
+  RESULT_VARIABLE V7B2_PATCH_RESULT
+  OUTPUT_VARIABLE V7B2_PATCH_STDOUT
+  ERROR_VARIABLE V7B2_PATCH_STDERR
+)
+if(NOT V7B2_PATCH_RESULT EQUAL 0)
+  message(FATAL_ERROR "V7B.2 prebuffered source generation failed: ${V7B2_PATCH_STDERR}")
+endif()
+message(STATUS "${V7B2_PATCH_STDOUT}")
+
 add_executable(Spelunkr360V7A
-  "${V7B1_MAIN}"
+  "${V7B2_MAIN}"
   newlib_compat.c
   ../spelunkr360_v6c/schedule_core.c
 )
@@ -197,6 +210,6 @@ target_link_libraries(Spelunkr360V7A PRIVATE
 )
 target_compile_options(Spelunkr360V7A PRIVATE -Wall -Wextra -Werror -O2)
 xsdk_add_shaders(Spelunkr360V7A frame.vert frame.frag)
-xsdk_add_xex(Spelunkr360V7A TITLE_ID 0x53503601 NAME "Spelunkr360" VERSION 0.7.1.1)
+xsdk_add_xex(Spelunkr360V7A TITLE_ID 0x53503601 NAME "Spelunkr360" VERSION 0.7.1.2)
 
 configure_file("${MBEDTLS_XENON_DIR}/programs/xsdk/cacert.pem" ca.pem COPYONLY)

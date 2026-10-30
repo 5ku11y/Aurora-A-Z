@@ -67,26 +67,29 @@ else:
     raise SystemExit('V7C could not locate obsolete V7B timing helpers')
 
 # Write the hardware-proven V7B.3 intermediate, then layer V7C audio/A-V sync,
-# V7D's 60-second soak gates, V7E's async sequential prefetch, V7F's curl-28
-# partial-range recovery, and V7G's dedicated-core prefetch scheduling.
+# V7D's 60-second soak gates, V7E async prefetch, V7F curl-28 recovery,
+# V7G dedicated-core scheduling, and V7H progressive in-flight consumption.
 out.write_text(src)
 v7c = Path(__file__).with_name('patch_v7c.py')
 v7d = Path(__file__).with_name('patch_v7d.py')
 v7e = Path(__file__).with_name('patch_v7e.py')
 v7f = Path(__file__).with_name('patch_v7f.py')
 v7g = Path(__file__).with_name('patch_v7g.py')
+v7h = Path(__file__).with_name('patch_v7h.py')
 tmp_c = out.with_name(out.name + '.v7c')
 tmp_d = out.with_name(out.name + '.v7d')
 tmp_e = out.with_name(out.name + '.v7e')
 tmp_f = out.with_name(out.name + '.v7f')
 tmp_g = out.with_name(out.name + '.v7g')
+tmp_h = out.with_name(out.name + '.v7h')
 subprocess.run([sys.executable, str(v7c), str(out), str(tmp_c)], check=True)
 subprocess.run([sys.executable, str(v7d), str(tmp_c), str(tmp_d)], check=True)
 subprocess.run([sys.executable, str(v7e), str(tmp_d), str(tmp_e)], check=True)
 subprocess.run([sys.executable, str(v7f), str(tmp_e), str(tmp_f)], check=True)
 subprocess.run([sys.executable, str(v7g), str(tmp_f), str(tmp_g)], check=True)
-tmp_g.replace(out)
-for tmp in (tmp_c, tmp_d, tmp_e, tmp_f):
+subprocess.run([sys.executable, str(v7h), str(tmp_g), str(tmp_h)], check=True)
+tmp_h.replace(out)
+for tmp in (tmp_c, tmp_d, tmp_e, tmp_f, tmp_g):
     if tmp.exists():
         tmp.unlink()
-print(f"generated {out} with V7B.3 + V7C + V7D + V7E + V7F + V7G dedicated prefetch scheduling")
+print(f"generated {out} with V7B.3 + V7C + V7D + V7E + V7F + V7G + V7H progressive prefetch")

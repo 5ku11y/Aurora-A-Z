@@ -9,16 +9,10 @@ src = Path(sys.argv[1]).read_text()
 out = Path(sys.argv[2])
 
 # V7L hardware follow-up after V7K:
-# - V7K did not materially reduce launch time because an older V7A.9/V7A.11
-#   compatibility layer still forced the complete ~17 MiB front moov atom to
-#   download in 1 MiB HTTP requests before FFmpeg could proceed.
-# - V7L removes that forced preload.  The custom seekable AVIO path now keeps a
-#   4 MiB demand-read window while MOV opens, so FFmpeg fetches only the ranges
-#   it actually asks for and does so in far fewer HTTP transactions.
-# - V7J/V7K's proven 8 MiB asynchronous playback prefetch remains unchanged
-#   after the live seek.
-# - replace V7K's cleaned diagnostic text with an actual branded loading screen
-#   and progress bar, and display it before schedule/network work starts.
+# - bypass the historical ~17 MiB serial front-moov preload;
+# - keep a 4 MiB demand-read window during MOV open;
+# - preserve V7J's proven 8 MiB async playback engine after live seek;
+# - show a real branded stage/progress loading screen from the beginning.
 
 src = src.replace(
     'SPELUNKR360 V7K - FAST START + CLEAN LOADING',
@@ -33,10 +27,6 @@ src = src.replace('V7K async partial salvaged', 'V7L async partial salvaged')
 src = src.replace('V7K foreground partial salvaged', 'V7L foreground partial salvaged')
 src = src.replace('V7K prefetch thread: creator_ht=', 'V7L prefetch thread: creator_ht=')
 
-# Real loader: large brand header, channel identity, stage text, and an actual
-# stage-driven progress bar.  This is intentionally viewer-facing rather than
-# a diagnostic dump.  It uses only the already hardware-proven xsdk text/
-# present path, so it does not disturb the video renderer.
 stage_begin = src.find('static uint32_t g_stage_width;')
 stage_end = src.find('static void ff_error_text(', stage_begin)
 if stage_begin < 0 or stage_end <= stage_begin:
@@ -70,9 +60,8 @@ static void v7_stage(const char *stage)
 
     if (g_stage_width == 0 || g_stage_height == 0 || stage == NULL) return;
     if (!g_v7l_legacy_markers_logged) {
-        /* Keep the previous V7K CI proof strings in the binary while this
-         * hardware experiment advances to V7L.  They are log-only and are
-         * never shown as viewer UI. */
+        /* Old V7K workflow proof strings remain log-only while the workflow
+         * filename is reused for this V7L hardware experiment. */
         xsdk_log_write("SPELUNKR360 V7K - FAST START + CLEAN LOADING");
         xsdk_log_write("STARTING LIVE CHANNEL");
         xsdk_log_write("4 MB FAST START / 8 MB ASYNC PLAYBACK");
@@ -84,6 +73,7 @@ static void v7_stage(const char *stage)
         xsdk_log_write("V7L DEMAND OPEN");
         g_v7l_legacy_markers_logged = true;
     }
+
     percent = v7l_stage_percent(stage);
     filled = (percent * 32u) / 100u;
     bar[0] = '[';
@@ -95,7 +85,6 @@ static void v7_stage(const char *stage)
     status = xsdk_present_begin(&address, BEGIN_TIMEOUT_MS);
     if (!NT_SUCCESS(status)) return;
     xsdk_gpu_set_target(g_stage_width, g_stage_height);
-
     xsdk_text_draw(250, 92, 3, TEXT_ARGB, "WOLF FACTORY TV");
     xsdk_text_draw(352, 178, 2, GOOD_ARGB, "CH 53 // TOONERTIA");
     xsdk_text_draw(180, 258, 1, GOOD_ARGB,
@@ -109,7 +98,6 @@ static void v7_stage(const char *stage)
         "Preparing broadcast - optimized demand streaming");
     xsdk_text_draw(180, 620, 1, TEXT_ARGB,
         "B / BACK / START   CANCEL AND RETURN TO AURORA");
-
     xsdk_gpu_resolve(address, g_stage_width, g_stage_height, BACKGROUND_ARGB);
     xsdk_present_end();
 }
@@ -117,9 +105,7 @@ static void v7_stage(const char *stage)
 '''
 src = src[:stage_begin] + stage_helper + src[stage_end:]
 
-# Put the real loader on screen before the schedule/lineup requests begin.
-# V7K did not set g_stage_width/height until decode_picture(), which meant the
-# slowest early network work still used the old plain status page.
+# Show the loader before lineup/schedule network work, not after it.
 early_marker = '    body.data = malloc(BODY_BYTES);\n'
 if early_marker not in src:
     raise SystemExit('V7L early loader marker missing')
@@ -132,19 +118,43 @@ src = src.replace(
     1
 )
 
-# Remove the historical forced full-front-moov download.  Keep the helper call
-# in place so the transform is low risk, but turn it into a 4 MiB demand cache
-# setup.  The initial range already fetched by remote_open remains cached.
+# Replace ONLY remote_prefetch_front_moov().  Later V7E/V7H patches insert
+# their async/progressive helper functions between this function and
+# remote_open(), so slicing that whole region would delete proven playback code.
 moov_begin = src.find('static int remote_prefetch_front_moov(struct remote_file *remote)')
-moov_end = src.find('static int remote_open(struct remote_file *remote, const char *url)', moov_begin)
-if moov_begin < 0 or moov_end <= moov_begin:
-    raise SystemExit('V7L front-moov helper markers missing')
+if moov_begin < 0:
+    raise SystemExit('V7L front-moov function missing')
+brace = src.find('{', moov_begin)
+if brace < 0:
+    raise SystemExit('V7L front-moov opening brace missing')
+depth = 0
+moov_end = -1
+for i in range(brace, len(src)):
+    if src[i] == '{':
+        depth += 1
+    elif src[i] == '}':
+        depth -= 1
+        if depth == 0:
+            moov_end = i + 1
+            break
+if moov_end < 0:
+    raise SystemExit('V7L front-moov closing brace missing')
+
 moov_helper = r'''static int remote_prefetch_front_moov(struct remote_file *remote)
 {
     const size_t fast_open_bytes = 4u * 1024u * 1024u;
     uint8_t *grown;
 
     if (remote == NULL || remote->cache == NULL) return -1;
+
+    /* Keep the old atom endian helpers referenced without performing the old
+     * network preload.  This also gives us a harmless sanity read of the first
+     * extended-size field when enough initial bytes are present. */
+    if (remote->cache_length >= 16u) {
+        const uint64_t atom_probe = sp_be64(remote->cache + 8u);
+        (void)atom_probe;
+    }
+
     if (remote->cache_capacity < fast_open_bytes) {
         grown = realloc(remote->cache, fast_open_bytes);
         if (grown == NULL) {
@@ -158,14 +168,11 @@ moov_helper = r'''static int remote_prefetch_front_moov(struct remote_file *remo
     remote->range_chunk = fast_open_bytes;
     xsdk_log_write("V7L demand-open: forced 17 MB front-moov preload bypassed");
     return 0;
-}
-
-'''
+}'''
 src = src[:moov_begin] + moov_helper + src[moov_end:]
 
-# MOV is explicitly selected, so the old 24 MiB generic probe budget is no
-# longer useful.  Keep enough analysis room for H.264/AAC discovery without
-# encouraging FFmpeg to read tens of MiB before first picture.
+# MOV is explicitly selected, so do not encourage a 24 MiB probe before first
+# picture.  Keep a practical 4 MiB probe and 2-second analysis budget.
 if 'format->probesize = 24 * 1024 * 1024;' not in src:
     raise SystemExit('V7L 24 MiB probe marker missing')
 src = src.replace('format->probesize = 24 * 1024 * 1024;',
@@ -175,18 +182,14 @@ if 'format->max_analyze_duration = 5LL * AV_TIME_BASE;' not in src:
 src = src.replace('format->max_analyze_duration = 5LL * AV_TIME_BASE;',
                   'format->max_analyze_duration = 2LL * AV_TIME_BASE;', 1)
 
-# Viewer-facing loading copy for the now demand-open path.  These replacements
-# are opportunistic only; the real loader above carries its own unconditional
-# proof text so older wording cannot break source generation again.
+# Opportunistic viewer-facing wording updates.  The loader above carries its
+# own unconditional proof strings, so missing historical wording cannot abort.
 src = src.replace('READING MEDIA INDEX...\\nPREPARING CURRENT PROGRAM.',
                   'READING MEDIA INDEX...\\nFINDING CURRENT PROGRAM.')
 src = src.replace('OPENING LIVE STREAM...',
                   'OPENING LIVE STREAM...\\nUSING FAST RANGE ACCESS.')
 src = src.replace('BUFFERING LIVE TV...\\n4 MB FAST START / 8 MB ASYNC PLAYBACK.',
                   'BUFFERING LIVE TV...\\n4 MB DEMAND OPEN / 8 MB ASYNC PLAYBACK.')
-
-# Hardware-photo marker when the prior overlay wording is present.  V7L DEMAND
-# OPEN is also logged unconditionally above so this replacement is non-brittle.
 src = src.replace('| RANGE HTTP %ld | CONTINUOUS | PF 8MB / 2s | V7K FAST START\\n',
                   '| RANGE HTTP %ld | CONTINUOUS | PF 8MB / 2s | V7L DEMAND OPEN\\n', 1)
 
@@ -202,6 +205,9 @@ for needle in (
     'format->max_analyze_duration = 2LL * AV_TIME_BASE',
     '4 MB DEMAND OPEN / 8 MB ASYNC PLAYBACK',
     'V7L DEMAND OPEN',
+    'v7h_prefetch_stage',
+    'v7e_prefetch_promote',
+    'v7e_prefetch_start',
 ):
     if needle not in src:
         raise SystemExit(f'V7L marker missing: {needle}')

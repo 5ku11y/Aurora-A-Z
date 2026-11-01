@@ -71,18 +71,16 @@ block = block.replace(
     1
 )
 
-# Once the first range succeeds, make the loader advance before FFmpeg/MOV open.
-ready_anchor = '    remote->cache_start = 0;\n    remote->position = 0;\n    return 0;\n'
-if ready_anchor not in block:
-    raise SystemExit('V7O remote_open completion marker missing')
-block = block.replace(
-    ready_anchor,
-    '    remote->cache_start = 0;\n'
-    '    remote->position = 0;\n'
-    '    v7_stage("MEDIA HEADER READY - OPENING MP4...");\n'
-    '    return 0;\n',
-    1
-)
+# Advance the loader immediately before remote_open()'s final successful return.
+# Later V7 patches added bookkeeping around the old cache_start/position lines,
+# so key off the function's last indented success return instead of adjacency.
+success_return = '    return 0;\n'
+return_at = block.rfind(success_return)
+if return_at < 0:
+    raise SystemExit('V7O remote_open success return missing')
+block = (block[:return_at] +
+         '    v7_stage("MEDIA HEADER READY - OPENING MP4...");\n' +
+         block[return_at:])
 
 src = src[:remote_begin] + block + src[remote_end:]
 

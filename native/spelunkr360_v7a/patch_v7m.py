@@ -120,10 +120,16 @@ if present_token in main_slice[main_key:main_play]:
 
 out.write_text(src)
 
-# V7N layers the final viewer-facing timed Spelunkr TV loader and safe schedule
-# connection reuse on top of this validated V7M fast-track source.
+# V7N layers the final viewer-facing timed Spelunkr TV loader on top of this
+# validated V7M fast-track source. V7O then narrows only the first Archive.org
+# bootstrap request to 1 MiB while retaining 4 MiB demand / 8 MiB playback IO.
 v7n = Path(__file__).with_name('patch_v7n.py')
+v7o = Path(__file__).with_name('patch_v7o.py')
 tmp_n = out.with_name(out.name + '.v7n')
+tmp_o = out.with_name(out.name + '.v7o')
 subprocess.run([sys.executable, str(v7n), str(out), str(tmp_n)], check=True)
-tmp_n.replace(out)
-print(f"generated {out} through V7N Spelunkr TV timed-loader fast-open playback")
+subprocess.run([sys.executable, str(v7o), str(tmp_n), str(tmp_o)], check=True)
+tmp_o.replace(out)
+if tmp_n.exists():
+    tmp_n.unlink()
+print(f"generated {out} through V7O 1 MiB-bootstrap Spelunkr TV playback")

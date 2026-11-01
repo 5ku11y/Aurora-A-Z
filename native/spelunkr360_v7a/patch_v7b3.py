@@ -66,7 +66,7 @@ if helper_start >= 0 and play_start > helper_start:
 else:
     raise SystemExit('V7C could not locate obsolete V7B timing helpers')
 
-# Layer the hardware-proven playback stack through V7M.
+# Layer the hardware-proven playback stack through V7Q.
 out.write_text(src)
 v7c = Path(__file__).with_name('patch_v7c.py')
 v7d = Path(__file__).with_name('patch_v7d.py')
@@ -79,6 +79,7 @@ v7j = Path(__file__).with_name('patch_v7j.py')
 v7k = Path(__file__).with_name('patch_v7k.py')
 v7l = Path(__file__).with_name('patch_v7l.py')
 v7m = Path(__file__).with_name('patch_v7m.py')
+v7q = Path(__file__).with_name('patch_v7q.py')
 tmp_c = out.with_name(out.name + '.v7c')
 tmp_d = out.with_name(out.name + '.v7d')
 tmp_e = out.with_name(out.name + '.v7e')
@@ -90,6 +91,7 @@ tmp_j = out.with_name(out.name + '.v7j')
 tmp_k = out.with_name(out.name + '.v7k')
 tmp_l = out.with_name(out.name + '.v7l')
 tmp_m = out.with_name(out.name + '.v7m')
+tmp_q = out.with_name(out.name + '.v7q')
 subprocess.run([sys.executable, str(v7c), str(out), str(tmp_c)], check=True)
 subprocess.run([sys.executable, str(v7d), str(tmp_c), str(tmp_d)], check=True)
 subprocess.run([sys.executable, str(v7e), str(tmp_d), str(tmp_e)], check=True)
@@ -101,8 +103,9 @@ subprocess.run([sys.executable, str(v7j), str(tmp_i), str(tmp_j)], check=True)
 subprocess.run([sys.executable, str(v7k), str(tmp_j), str(tmp_k)], check=True)
 subprocess.run([sys.executable, str(v7l), str(tmp_k), str(tmp_l)], check=True)
 subprocess.run([sys.executable, str(v7m), str(tmp_l), str(tmp_m)], check=True)
-tmp_m.replace(out)
-for tmp in (tmp_c, tmp_d, tmp_e, tmp_f, tmp_g, tmp_h, tmp_i, tmp_j, tmp_k, tmp_l):
+subprocess.run([sys.executable, str(v7q), str(tmp_m), str(tmp_q)], check=True)
+tmp_q.replace(out)
+for tmp in (tmp_c, tmp_d, tmp_e, tmp_f, tmp_g, tmp_h, tmp_i, tmp_j, tmp_k, tmp_l, tmp_m):
     if tmp.exists():
         tmp.unlink()
-print(f"generated {out} through V7M persistent-loader fast-track playback")
+print(f"generated {out} through V7Q audio-safe monotonic-loader playback")

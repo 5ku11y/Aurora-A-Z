@@ -63,34 +63,43 @@ src = src.replace(retry_field,
                   retry_field + '    unsigned foreground_retries;\n', 1)
 
 # Hide brief Archive.org zero-byte/range failures from FFmpeg when a retry can
-# recover them. This stays inside the AVIO reader so the demuxer sees a normal
-# byte stream whenever possible.
+# recover them. Later transport patches have changed the surrounding prefetch
+# block several times, so patch only the stable remote_fill + EIO pair inside
+# avio_remote_read instead of matching the entire historical block.
 read_begin = src.find('static int avio_remote_read(void *opaque, uint8_t *buffer, int buffer_size)')
 read_end = src.find('\nstatic int64_t avio_remote_seek(', read_begin)
 if read_begin < 0 or read_end <= read_begin:
     raise SystemExit('V7P avio_remote_read boundaries missing')
 read_block = src[read_begin:read_end]
-old_fill = '''                if (promoted < 0) remote->prefetch_fallbacks++;
-                if (remote_fill(remote, remote->position) != 0)
-                    return copied > 0 ? copied : AVERROR(EIO);
-                (void)v7e_prefetch_start(remote);'''
-new_fill = '''                int fill_result;
-                unsigned retry = 0;
-                if (promoted < 0) remote->prefetch_fallbacks++;
-                fill_result = remote_fill(remote, remote->position);
-                while (fill_result != 0 && retry < 2u && !wants_exit()) {
-                    retry++;
-                    remote->foreground_retries++;
-                    xsdk_log_write("V7P foreground refill retry %u pos=%" PRId64 " err=%.96s",
-                        retry, remote->position, remote->error);
-                    fill_result = remote_fill(remote, remote->position);
-                }
-                if (fill_result != 0)
-                    return copied > 0 ? copied : AVERROR(EIO);
-                (void)v7e_prefetch_start(remote);'''
-if old_fill not in read_block:
-    raise SystemExit('V7P AVIO refill marker missing')
-read_block = read_block.replace(old_fill, new_fill, 1)
+fill_call = 'if (remote_fill(remote, remote->position) != 0)'
+fill_at = read_block.find(fill_call)
+if fill_at < 0:
+    raise SystemExit('V7P AVIO remote_fill call missing')
+return_token = 'return copied > 0 ? copied : AVERROR(EIO);'
+return_at = read_block.find(return_token, fill_at)
+if return_at < 0:
+    raise SystemExit('V7P AVIO EIO return missing')
+line_start = read_block.rfind('\n', 0, fill_at) + 1
+line_end = read_block.find('\n', return_at)
+if line_end < 0:
+    line_end = len(read_block)
+else:
+    line_end += 1
+indent = read_block[line_start:fill_at]
+retry_code = (
+    indent + 'int fill_result = remote_fill(remote, remote->position);\n' +
+    indent + 'unsigned retry = 0;\n' +
+    indent + 'while (fill_result != 0 && retry < 2u && !wants_exit()) {\n' +
+    indent + '    retry++;\n' +
+    indent + '    remote->foreground_retries++;\n' +
+    indent + '    xsdk_log_write("V7P foreground refill retry %u pos=%" PRId64 " err=%.96s",\n' +
+    indent + '        retry, remote->position, remote->error);\n' +
+    indent + '    fill_result = remote_fill(remote, remote->position);\n' +
+    indent + '}\n' +
+    indent + 'if (fill_result != 0)\n' +
+    indent + '    return copied > 0 ? copied : AVERROR(EIO);\n'
+)
+read_block = read_block[:line_start] + retry_code + read_block[line_end:]
 src = src[:read_begin] + read_block + src[read_end:]
 
 # V7I converted the hardware-proven soak loop into continuous playback, but the

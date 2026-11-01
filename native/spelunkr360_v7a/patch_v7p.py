@@ -139,7 +139,7 @@ src = src.replace(old_loop, new_loop, 1)
 cleanup_anchor = '    if (range_http != NULL) *range_http = remote.last_http;\n'
 if cleanup_anchor not in src:
     raise SystemExit('V7P playback cleanup marker missing')
-src = src.replace(cleanup_anchor, '        }\n    }\n' + cleanup_anchor, 1)
+src = src.replace(cleanup_anchor, '    }\n' + cleanup_anchor, 1)
 
 src = src.replace(
     '| RANGE HTTP %ld | CONTINUOUS | PF 8MB / 2s | V7O 1MB BOOT\\n',

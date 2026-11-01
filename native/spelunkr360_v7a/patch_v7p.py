@@ -143,12 +143,20 @@ if old_loop not in src:
     raise SystemExit('V7P V7I continuous loop marker missing')
 src = src.replace(old_loop, new_loop, 1)
 
-# The original loop body already has one closing brace. Add one more to close
-# the local retry scope immediately before range_http is copied during cleanup.
+# The original loop body already owns the closing brace for the new inner while.
+# Add exactly one more brace before play_av_continuous() cleanup, not before an
+# older helper's identical range_http line.
+play_begin = src.find('static int play_av_continuous(')
+main_begin = src.find('\nint main(void)', play_begin)
+if play_begin < 0 or main_begin <= play_begin:
+    raise SystemExit('V7P play_av_continuous boundaries missing')
+play_block = src[play_begin:main_begin]
 cleanup_anchor = '    if (range_http != NULL) *range_http = remote.last_http;\n'
-if cleanup_anchor not in src:
-    raise SystemExit('V7P playback cleanup marker missing')
-src = src.replace(cleanup_anchor, '    }\n' + cleanup_anchor, 1)
+cleanup_at = play_block.rfind(cleanup_anchor)
+if cleanup_at < 0:
+    raise SystemExit('V7P continuous-player cleanup marker missing')
+play_block = play_block[:cleanup_at] + '    }\n' + play_block[cleanup_at:]
+src = src[:play_begin] + play_block + src[main_begin:]
 
 src = src.replace(
     '| RANGE HTTP %ld | CONTINUOUS | PF 8MB / 2s | V7O 1MB BOOT\\n',

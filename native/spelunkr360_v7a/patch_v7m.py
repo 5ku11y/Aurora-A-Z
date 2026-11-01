@@ -120,16 +120,20 @@ if present_token in main_slice[main_key:main_play]:
 
 out.write_text(src)
 
-# V7N layers the final viewer-facing timed Spelunkr TV loader on top of this
-# validated V7M fast-track source. V7O then narrows only the first Archive.org
-# bootstrap request to 1 MiB while retaining 4 MiB demand / 8 MiB playback IO.
+# V7N layers the timed Spelunkr TV loader on top of V7M. V7O narrows only the
+# first Archive.org bootstrap request to 1 MiB. V7P then makes the tuning meter
+# monotonic and recovers transient demux/range failures before the real MP4 end.
 v7n = Path(__file__).with_name('patch_v7n.py')
 v7o = Path(__file__).with_name('patch_v7o.py')
+v7p = Path(__file__).with_name('patch_v7p.py')
 tmp_n = out.with_name(out.name + '.v7n')
 tmp_o = out.with_name(out.name + '.v7o')
+tmp_p = out.with_name(out.name + '.v7p')
 subprocess.run([sys.executable, str(v7n), str(out), str(tmp_n)], check=True)
 subprocess.run([sys.executable, str(v7o), str(tmp_n), str(tmp_o)], check=True)
-tmp_o.replace(out)
-if tmp_n.exists():
-    tmp_n.unlink()
-print(f"generated {out} through V7O 1 MiB-bootstrap Spelunkr TV playback")
+subprocess.run([sys.executable, str(v7p), str(tmp_o), str(tmp_p)], check=True)
+tmp_p.replace(out)
+for tmp in (tmp_n, tmp_o):
+    if tmp.exists():
+        tmp.unlink()
+print(f"generated {out} through V7P monotonic-loader transient-EOF recovery playback")
